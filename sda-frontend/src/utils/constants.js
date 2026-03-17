@@ -27,8 +27,6 @@ export const REPORT_CATEGORIES = [
   
   // ============ CONTENT TYPES ============
   export const CONTENT_TYPES = {
-    FORUM_POST: 'forumPost',
-    FORUM_REPLY: 'forumReply',
     PRAYER_REQUEST: 'prayerRequest',
     TESTIMONY: 'testimony',
     GROUP_DISCUSSION: 'groupDiscussion',
@@ -61,7 +59,6 @@ export const REPORT_CATEGORIES = [
   
   // ============ FEATURE FLAGS ============
   export const FEATURE_FLAGS = {
-    FORUM: 'forum',
     PRAYER_WALL: 'prayerWall',
     GROUPS: 'groups',
     LOCATION: 'location',

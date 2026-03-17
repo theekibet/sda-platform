@@ -7,22 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Keep Church model but make it optional/lightweight
-model Church {
-  id         String  @id @default(cuid())
-  name       String  @unique
-  location   String
-  conference String?
-
-  members Member[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("churches")
-}
-
-// Simplified Member model with ADMIN FIELDS
+// ============ MEMBER MODEL ============
 model Member {
   id       String  @id @default(cuid())
   name     String
@@ -30,217 +15,99 @@ model Member {
   phone    String? @unique
   password String
   avatarUrl String?  // URL to profile picture
+  
   // Simple user profile
   bio    String?
   age    Int?
   gender String?
 
-  // Location (privacy-first)
-  city         String?
-  region       String?
-  country      String?
-  showLocation Boolean @default(true)
+  // Location - SIMPLIFIED
+  locationName  String?   // "Nairobi, Kenya" or "Kenya" (for display)
+  latitude      Float?    // For accurate distance calculation
+  longitude     Float?
+  locationPrivacy String @default("city") // 'exact', 'city', 'country', 'none'
+  locationLastUpdated DateTime? // Track when location was last updated
 
   // Activity tracking
   isActive     Boolean   @default(true)
   lastActiveAt DateTime?
 
   // ============ ADMIN FIELDS ============
-  isAdmin           Boolean   @default(false)      // Admin privileges
-  isSuspended       Boolean   @default(false)      // Account suspended
-  suspendedUntil    DateTime?                      // Temporary suspension
-  suspensionReason  String?                         // Why suspended
-  
-  // Password Reset
-  resetToken        String?   @unique               // Password reset token
-  resetTokenExpiry  DateTime?                       // When token expires
-  
-  // Admin Notes
-  adminNotes        String?                          // Private admin notes
+  isAdmin           Boolean   @default(false)
+  isSuspended       Boolean   @default(false)
+  suspendedUntil    DateTime?
+  suspensionReason  String?
+  resetToken        String?   @unique
+  resetTokenExpiry  DateTime?
+  adminNotes        String?
 
-  // RELATIONS
-  church   Church? @relation(fields: [churchId], references: [id])
-  churchId String?
-
-  forumPosts         ForumPost[]
-  forumReplies       ForumReply[]
-  testimonies        Testimony[]
-  eventsCreated      Event[]
-  eventsAttending    EventAttendee[]
+  // ============ RELATIONS ============
+  // Prayer
   prayerRequests     PrayerRequest[]
   prayersGiven       PrayerInteraction[]
+  
+  // Testimonies
+  testimonies        Testimony[]
   encouragements     Encouragement[]
   
-  // Group relations
+  // Groups - UPDATED RELATIONS
   groupsCreated      Group[]          
-  groupMemberships   GroupMember[]     
-  groupDiscussions   GroupDiscussion[] 
-  groupDiscussionReplies GroupDiscussionReply[] 
+  groupMemberships   GroupMember[]
+  groupMessages      GroupMessage[]      // 👈 NEW
+  messageReactions   MessageReaction[]    // 👈 NEW
   groupEventsCreated GroupEvent[]      
   groupEventAttendance GroupEventAttendee[]
 
-  // ============ MODERATION RELATIONS ============
-  // Reports created by this user (as reporter)
+  // Moderation
   reportsCreated     Report[]    @relation("ReportedBy")
-  
-  // Reports where this user is the one being reported
   reportsReceived    Report[]    @relation("ReportedUser")
-  
-  // Reports resolved by this user (as admin)
   reportsResolved    Report[]    @relation("ResolvedBy")
-  
-  // Moderation actions performed by this user
   moderationActions  ModerationLog[] @relation("Moderator")
-  
-  // Moderation actions targeting this user
   moderationReceived ModerationLog[] @relation("ModeratedUser")
 
-  // ============ PHASE 4 - AUDIT RELATIONS ============
+  // Audit
   auditLogs          AuditLog[]
   systemLogs         SystemLog[]
 
-  // ============ PHASE 5 - SETTINGS RELATIONS ============
+  // Settings
   settingsUpdated    SystemSetting[] @relation("UpdatedBy")
   featuresUpdated    FeatureFlag[]   @relation("FeatureUpdatedBy")
 
-  // ============ PHASE 6 - ANNOUNCEMENTS RELATIONS ============
+  // Announcements
   announcementsCreated Announcement[]     @relation("CreatedBy")
   announcementViews    AnnouncementView[]
 
-  // ============ PHASE 7 - SECURITY RELATIONS ============
+  // Security
   blockedIPsCreated    BlockedIP[]       @relation("BlockedBy")
   userSessions         UserSession[]
   loginAttempts        LoginAttempt[]
 
-  // ============ PHASE 8 - BACKUP RELATIONS ============
+  // Backups
   backupsCreated       Backup[]          @relation("BackupCreatedBy")
 
+  // Bible
   sharedVerses        SharedVerse[]
   reviewedVerses      SharedVerse[] @relation("ReviewedVerses")
+  verseLikes          VerseLike[]
+  verseBookmarks      VerseBookmark[]
+  verseComments       VerseComment[]
+  
+  // Community Board
+  communityPosts      CommunityPost[]
+  communityResponses  CommunityResponse[]
+
+  // Notifications
+  notifications        Notification[]
+  notificationPreferences NotificationPreference?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("members")
 }
 
-// Forums for anonymous questions
-model ForumPost {
-  id          String  @id @default(cuid())
-  title       String
-  content     String
-  authorId    String?
-  author      Member? @relation(fields: [authorId], references: [id])
-  isAnonymous Boolean @default(false)
-  location    String?
+// ============ PRAYER & TESTIMONIES ============
 
-  // Engagement
-  helpfulCount Int @default(0)
-  savedCount   Int @default(0)
-  replyCount   Int @default(0)
-
-  // RELATIONS
-  replies ForumReply[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("forum_posts")
-}
-
-model ForumReply {
-  id          String    @id @default(cuid())
-  content     String
-  postId      String
-  post        ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  authorId    String?
-  author      Member?   @relation(fields: [authorId], references: [id])
-  isAnonymous Boolean   @default(false)
-
-  // Helpful votes
-  helpfulVotes Int @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("forum_replies")
-}
-
-// Testimonies
-model Testimony {
-  id       String @id @default(cuid())
-  title    String
-  content  String
-  authorId String
-  author   Member @relation(fields: [authorId], references: [id])
-
-  // Which prayer request this testimony answers (optional)
-  prayerRequestId String?
-  prayerRequest   PrayerRequest? @relation(fields: [prayerRequestId], references: [id])
-
-  // Engagement
-  encouragedCount Int @default(0)
-
-  // RELATIONS
-  encouragements Encouragement[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("testimonies")
-}
-
-model Encouragement {
-  id          String    @id @default(cuid())
-  testimonyId String
-  testimony   Testimony @relation(fields: [testimonyId], references: [id], onDelete: Cascade)
-  memberId    String
-  member      Member    @relation(fields: [memberId], references: [id])
-
-  createdAt DateTime @default(now())
-
-  @@unique([testimonyId, memberId])
-  @@map("encouragements")
-}
-
-// Events (youth-organized)
-model Event {
-  id          String    @id @default(cuid())
-  title       String
-  description String
-  location    String
-  venue       String?
-  date        DateTime
-  endDate     DateTime?
-
-  organizerId String
-  organizer   Member @relation(fields: [organizerId], references: [id])
-
-  // Participants
-  maxAttendees Int?
-
-  // RELATIONS
-  attendees EventAttendee[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("events")
-}
-
-model EventAttendee {
-  id       String @id @default(cuid())
-  eventId  String
-  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  memberId String
-  member   Member @relation(fields: [memberId], references: [id])
-
-  createdAt DateTime @default(now())
-
-  @@unique([eventId, memberId])
-  @@map("event_attendees")
-}
-
-// Prayer Requests
 model PrayerRequest {
   id          String  @id @default(cuid())
   content     String
@@ -249,7 +116,7 @@ model PrayerRequest {
   isAnonymous Boolean @default(false)
 
   // Location context (optional)
-  city String?
+  locationName String?
 
   // Engagement
   prayedCount Int @default(0)
@@ -277,38 +144,87 @@ model PrayerInteraction {
   @@map("prayer_interactions")
 }
 
-// ============ INTEREST-BASED GROUPS ============
+model Testimony {
+  id       String @id @default(cuid())
+  title    String
+  content  String
+  authorId String
+  author   Member @relation(fields: [authorId], references: [id])
+
+  prayerRequestId String?
+  prayerRequest   PrayerRequest? @relation(fields: [prayerRequestId], references: [id])
+
+  encouragedCount Int @default(0)
+  encouragements Encouragement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("testimonies")
+}
+
+model Encouragement {
+  id          String    @id @default(cuid())
+  testimonyId String
+  testimony   Testimony @relation(fields: [testimonyId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      Member    @relation(fields: [memberId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([testimonyId, memberId])
+  @@map("encouragements")
+}
+
+// ============ GROUPS (Simplified Single Chat) ============
 
 model Group {
   id          String    @id @default(cuid())
   name        String
   description String
-  category    String    // 'MUSIC', 'BIBLE_STUDY', 'PRAYER', 'MENTAL_HEALTH', etc.
+  category    String    // 'GENERAL', 'MUSIC', 'BIBLE_STUDY', 'PRAYER', 'MENTAL_HEALTH', 'LOCATION', etc.
   isPrivate   Boolean   @default(false)
-  location    String?   // City or "Online"
+  location    String?   // City or "Online" (display purposes only)
   imageUrl    String?   // Optional group cover image
   
   // Rules and settings
   rules       String?   
-  requireApproval Boolean @default(true) // Require admin approval to join
+  requireApproval Boolean @default(true)
+  
+  // Integration fields
+  isDefault      Boolean  @default(false)  // For "General Discussion" group
+  allowAnonymous Boolean  @default(false)
+  sortOrder      Int?
+  
+  // ============ NEW FIELDS ============
+  // Explicitly marks if this group is location-specific
+  isLocationBased Boolean @default(false)
+  
+  // How the group primarily meets: 'online', 'in-person', 'hybrid'
+  meetingType     String  @default("online")
   
   // Statistics
   memberCount Int       @default(0)
+  messageCount Int      @default(0)        // 👈 NEW: Track total messages
+  lastMessageAt DateTime?                   // 👈 NEW: For sorting by activity
   
   // Relations
   createdById String
   createdBy   Member    @relation(fields: [createdById], references: [id])
   members     GroupMember[]
-  discussions GroupDiscussion[]
+  messages    GroupMessage[]    // 👈 NEW: Single chat per group
   events      GroupEvent[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  @@index([category])
+  @@index([isDefault])
+  @@index([meetingType])
+  @@index([lastMessageAt])  // 👈 NEW: Index for activity sorting
   @@map("groups")
 }
 
-// Group Members with Roles
 model GroupMember {
   id        String   @id @default(cuid())
   groupId   String
@@ -319,49 +235,72 @@ model GroupMember {
   role      String   @default("member") // "admin", "moderator", "member"
   status    String   @default("pending") // "pending", "approved", "rejected"
   
+  // 👇 NEW: Track read receipts
+  lastReadAt DateTime?  // When user last read the chat
+  isMuted    Boolean    @default(false)
+  
   joinedAt  DateTime @default(now())
   
   @@unique([groupId, memberId])
   @@map("group_members")
 }
 
-// Group Discussions (private forum within group)
-model GroupDiscussion {
+// 👇 NEW: Single Message Model (replaces GroupDiscussion + GroupDiscussionReply)
+model GroupMessage {
   id          String    @id @default(cuid())
-  title       String
-  content     String
+  content     String    // Message content
+  
   groupId     String
   group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
   authorId    String
   author      Member    @relation(fields: [authorId], references: [id])
   
+  // Message metadata
+  messageType String    @default("text") // 'text', 'image', 'file', 'voice'
+  fileUrl     String?   // For images/files
+  fileSize    Int?      // File size in bytes
+  fileName    String?   // Original file name
+  
+  // Features
+  isAnonymous Boolean   @default(false)
+  isPinned    Boolean   @default(false)   // 👈 NEW: Pin important messages
+  isEdited    Boolean   @default(false)
+  
+  // Thread replies (optional - for replies to specific messages)
+  replyToId   String?
+  replyTo     GroupMessage? @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies     GroupMessage[] @relation("MessageReplies")
+  
   // Engagement
-  replyCount  Int       @default(0)
+  reactions   MessageReaction[]
   
-  // Relations
-  replies     GroupDiscussionReply[]
-  
+  // Metadata
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  @@map("group_discussions")
+  @@index([groupId, createdAt])
+  @@index([authorId])
+  @@index([isPinned])
+  @@map("group_messages")
 }
 
-model GroupDiscussionReply {
-  id           String           @id @default(cuid())
-  content      String
-  discussionId String
-  discussion   GroupDiscussion  @relation(fields: [discussionId], references: [id], onDelete: Cascade)
-  authorId     String
-  author       Member           @relation(fields: [authorId], references: [id])
+// 👇 NEW: Message Reactions
+model MessageReaction {
+  id        String        @id @default(cuid())
+  messageId String
+  message   GroupMessage  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      Member        @relation(fields: [userId], references: [id])
   
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  reaction  String // 'like', 'love', 'pray', 'amen', 'thanks'
+  
+  createdAt DateTime @default(now())
 
-  @@map("group_discussion_replies")
+  @@unique([messageId, userId, reaction])
+  @@map("message_reactions")
 }
 
-// Group Events
+// Group Events (unchanged)
 model GroupEvent {
   id          String    @id @default(cuid())
   title       String
@@ -401,8 +340,76 @@ model GroupEventAttendee {
   @@map("group_event_attendees")
 }
 
-// ============ MODERATION & REPORTING SYSTEM ============
+// ============ COMMUNITY BOARD (Public Posts) ============
+// (Keep all Community Board models as they are)
 
+model CommunityPost {
+  id          String   @id @default(cuid())
+  
+  authorId    String
+  author      Member   @relation(fields: [authorId], references: [id])
+  
+  // Post type - public events, support, rides, etc.
+  type        String   @default("general") // 'event', 'support', 'ride', 'donation', 'announcement', 'general'
+  
+  // Basic content
+  title       String
+  description String
+  
+  // For public events (optional)
+  eventDate   DateTime?
+  location    String?
+  
+  // For support/donations (optional)
+  goalAmount  Float?
+  currentAmount Float?   @default(0)
+  itemsNeeded String?
+  
+  // For ride sharing (optional)
+  fromLocation String?
+  toLocation   String?
+  departureTime DateTime?
+  seatsAvailable Int?
+  
+  // Contact info (optional)
+  contactPhone String?
+  contactEmail String?
+  
+  // Engagement counts
+  interestedCount Int @default(0)
+  goingCount     Int @default(0)
+  
+  // Relations
+  responses    CommunityResponse[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([type])
+  @@index([createdAt])
+  @@map("community_posts")
+}
+
+model CommunityResponse {
+  id          String   @id @default(cuid())
+  
+  postId      String
+  post        CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId      String
+  user        Member   @relation(fields: [userId], references: [id])
+  
+  response    String   // 'interested', 'going', 'helping', 'praying'
+  comment     String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([postId, userId])
+  @@map("community_responses")
+}
+
+// ============ MODERATION & REPORTING ============
+// (All moderation models remain the same)
 model Report {
   id            String   @id @default(cuid())
   reportedById  String
@@ -410,23 +417,19 @@ model Report {
   reportedUserId String?
   reportedUser  Member?  @relation("ReportedUser", fields: [reportedUserId], references: [id])
   
-  // What is being reported
-  contentType   String   // 'forumPost', 'forumReply', 'prayerRequest', 'testimony', 'groupDiscussion', 'user'
-  contentId     String   // ID of the reported content
-  contentSnippet String? // Preview of content
+  contentType   String   // 'prayerRequest', 'testimony', 'groupMessage', 'communityPost', 'user'  // 👈 UPDATED
+  contentId     String
+  contentSnippet String?
   
-  // Report details
   category      String   // 'spam', 'harassment', 'inappropriate', 'fake', 'other', 'auto-flagged'
   description   String?
   
-  // Status
   status        String   @default("pending") // 'pending', 'investigating', 'resolved', 'dismissed'
   priority      String   @default("medium") // 'low', 'medium', 'high', 'critical'
   
-  // Resolution
   resolvedById  String?
   resolvedBy    Member?  @relation("ResolvedBy", fields: [resolvedById], references: [id])
-  resolution    String?  // 'warning', 'content_removed', 'user_suspended', 'no_action'
+  resolution    String?
   resolvedAt    DateTime?
   adminNotes    String?
   
@@ -443,15 +446,14 @@ model ModerationLog {
   moderatorId  String
   moderator    Member   @relation("Moderator", fields: [moderatorId], references: [id])
   
-  action       String   // 'approved', 'removed', 'warned', 'suspended', 'report_resolved', 'flagged'
-  contentType  String   // 'forumPost', 'forumReply', 'prayerRequest', 'testimony', 'user', 'group'
+  action       String   // 'approved', 'removed', 'warned', 'suspended', 'report_resolved'
+  contentType  String
   contentId    String
   contentSnippet String?
   
   reason       String?
-  details      String?  // JSON string for additional data
-  
-  targetUserId String?  // If action affects a user
+  details      String?
+  targetUserId String?
   targetUser   Member?  @relation("ModeratedUser", fields: [targetUserId], references: [id])
   
   createdAt    DateTime @default(now())
@@ -464,8 +466,8 @@ model ModerationLog {
 model ContentFlag {
   id         String   @id @default(cuid())
   keyword    String   @unique
-  severity   String   @default("medium") // 'low', 'medium', 'high'
-  action     String   @default("flag") // 'flag', 'auto_remove', 'require_review'
+  severity   String   @default("medium")
+  action     String   @default("flag")
   isActive   Boolean  @default(true)
   
   createdAt  DateTime @default(now())
@@ -474,7 +476,8 @@ model ContentFlag {
   @@map("content_flags")
 }
 
-// ============ PHASE 4 - AUDIT & SYSTEM LOGS ============
+// ============ AUDIT & SYSTEM LOGS ============
+// (Keep all audit models as they are)
 
 model AuditLog {
   id         String   @id @default(cuid())
@@ -482,22 +485,19 @@ model AuditLog {
   user       Member?  @relation(fields: [userId], references: [id])
   
   action     String   // 'CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'LOGOUT'
-  entity     String   // 'user', 'forumPost', 'prayerRequest', 'group', etc.
+  entity     String
   entityId   String?
   
-  oldValue   String?  // JSON string
-  newValue   String?  // JSON string
-  
+  oldValue   String?
+  newValue   String?
   ipAddress  String?
   userAgent  String?
-  
-  metadata   String?  // JSON string for additional data
+  metadata   String?
   
   createdAt  DateTime @default(now())
 
   @@index([userId])
   @@index([action])
-  @@index([entity, entityId])
   @@index([createdAt])
   @@map("audit_logs")
 }
@@ -505,11 +505,10 @@ model AuditLog {
 model SystemLog {
   id        String   @id @default(cuid())
   level     String   // 'info', 'warn', 'error', 'debug'
-  source    String   // 'auth', 'api', 'database', 'email', 'system'
+  source    String
   message   String
   stack     String?
-  metadata  String?  // JSON string
-  
+  metadata  String?
   userId    String?
   user      Member?  @relation(fields: [userId], references: [id])
   
@@ -521,17 +520,18 @@ model SystemLog {
   @@map("system_logs")
 }
 
-// ============ PHASE 5 - SYSTEM SETTINGS & FEATURE FLAGS ============
+// ============ SETTINGS & FEATURE FLAGS ============
+// (Keep all settings models as they are)
 
 model SystemSetting {
   id          String   @id @default(cuid())
   key         String   @unique
   value       String   // JSON string
-  type        String   @default("string") // 'string', 'number', 'boolean', 'json', 'array'
+  type        String   @default("string")
   description String?
-  category    String   @default("general") // 'general', 'security', 'email', 'features', 'moderation'
+  category    String   @default("general")
   
-  isPublic    Boolean  @default(false) // Can be read by non-admins
+  isPublic    Boolean  @default(false)
   isEncrypted Boolean  @default(false)
   
   updatedById String?
@@ -549,9 +549,8 @@ model FeatureFlag {
   description String?
   enabled     Boolean  @default(false)
   
-  // Rollout strategy
-  percentage  Int?     @default(100) // 0-100
-  userGroups  String?  // JSON array of user groups
+  percentage  Int?     @default(100)
+  userGroups  String?
   
   updatedById String?
   updatedBy   Member?  @relation("FeatureUpdatedBy", fields: [updatedById], references: [id])
@@ -562,24 +561,22 @@ model FeatureFlag {
   @@map("feature_flags")
 }
 
-// ============ PHASE 6 - ANNOUNCEMENTS & NOTIFICATIONS ============
+// ============ ANNOUNCEMENTS ============
+// (Keep all announcement models as they are)
 
 model Announcement {
   id          String   @id @default(cuid())
   title       String
   content     String
-  type        String   @default("info") // 'info', 'warning', 'success', 'maintenance'
+  type        String   @default("info")
   
-  // Targeting
-  targetRole  String?  // 'all', 'admin', 'user' - null means all
-  targetUsers String?  // JSON array of user IDs
+  targetRole  String?
+  targetUsers String?
   
-  // Schedule
   scheduledAt DateTime?
   expiresAt   DateTime?
   isActive    Boolean  @default(true)
   
-  // Stats
   viewCount   Int      @default(0)
   
   createdById String
@@ -606,7 +603,8 @@ model AnnouncementView {
   @@map("announcement_views")
 }
 
-// ============ PHASE 7 - SECURITY FEATURES ============
+// ============ SECURITY ============
+// (Keep all security models as they are)
 
 model BlockedIP {
   id         String   @id @default(cuid())
@@ -655,7 +653,6 @@ model UserSession {
   
   lastActive DateTime @default(now())
   expiresAt  DateTime
-  
   isRevoked  Boolean  @default(false)
   
   createdAt  DateTime @default(now())
@@ -667,29 +664,33 @@ model UserSession {
   @@map("user_sessions")
 }
 
-// ============ PHASE 8 - BACKUP & MAINTENANCE ============
+// ============ BACKUP ============
+// (Keep backup models as they are)
 
 model Backup {
   id          String   @id @default(cuid())
   filename    String
-  size        Int      // in bytes
-  type        String   @default("manual") // 'manual', 'scheduled', 'pre-update'
-  status      String   @default("completed") // 'pending', 'completed', 'failed'
+  size        Int
+  type        String   @default("manual")
+  status      String   @default("completed")
   
   createdById String?
   createdBy   Member?  @relation("BackupCreatedBy", fields: [createdById], references: [id])
   
-  metadata    String?  // JSON string with backup info
+  metadata    String?
   
   createdAt   DateTime @default(now())
 
   @@map("backups")
 }
 
+// ============ BIBLE ============
+// (Keep all Bible models as they are)
+
 model BibleVersion {
   id             String   @id @default(cuid())
-  code           String   @unique // "kjv", "esv", "web", etc.
-  name           String   // "King James Version", "English Standard Version"
+  code           String   @unique
+  name           String
   language       String   @default("en")
   isActive       Boolean  @default(true)
   
@@ -704,26 +705,25 @@ model BibleVersion {
 model BibleVerse {
   id             String   @id @default(cuid())
   
-  // From Bible API
-  bibleId        String   // Unique ID from the API
+  bibleId        String
   versionId      String
   version        BibleVersion @relation(fields: [versionId], references: [id])
   
-  reference      String   // "John 3:16" (for display)
-  book           String   // "John"
+  reference      String
+  book           String
   chapter        Int
   verse          Int
-  text           String   // The verse text (use String, not @db.Text for SQLite)
+  text           String
   
-  // For verse ranges
-  verseEnd       Int?     // If it's a range (e.g., John 3:16-18)
+  verseEnd       Int?
   isRange        Boolean  @default(false)
   
-  // Metadata
-  searchVector   String?  // For full-text search (optional)
+  searchVector   String?
   
-  // Relations to user content
   sharedVerses   SharedVerse[]
+  likes          VerseLike[]
+  bookmarks      VerseBookmark[]
+  comments       VerseComment[]
   
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -737,31 +737,20 @@ model BibleVerse {
 model SharedVerse {
   id             String   @id @default(cuid())
   
-  // The verse being shared
   verseId        String
   verse          BibleVerse @relation(fields: [verseId], references: [id])
-  
-  // User who shared it
   userId         String
   user           Member   @relation(fields: [userId], references: [id], onDelete: Cascade)
   
-  // User's personal reflection
-  comment        String?  // Use String, not @db.Text for SQLite
+  comment        String?  
+  scheduledFor   DateTime? @unique
+  status         String   @default("pending") // 'pending', 'approved', 'scheduled', 'published', 'rejected'
   
-  // Scheduling
-  scheduledFor   DateTime? @unique // The date this verse is scheduled for
-  status         String   @default("pending") // "pending", "approved", "scheduled", "published", "rejected"
-  
-  // Admin review (optional)
   reviewedById   String?
   reviewedBy     Member?  @relation("ReviewedVerses", fields: [reviewedById], references: [id])
   reviewedAt     DateTime?
-  reviewNotes    String?  // Use String, not @db.Text for SQLite
+  reviewNotes    String?  
   
-  // Queue position (can be calculated, not stored)
-  // queuePosition Int?
-  
-  // Timestamps
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   
@@ -769,4 +758,94 @@ model SharedVerse {
   @@index([status])
   @@index([scheduledFor])
   @@map("shared_verses")
+}
+
+model VerseLike {
+  id        String   @id @default(cuid())
+  verseId   String
+  verse     BibleVerse @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      Member   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@unique([verseId, userId])
+  @@map("verse_likes")
+}
+
+model VerseBookmark {
+  id        String   @id @default(cuid())
+  verseId   String
+  verse     BibleVerse @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      Member   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+
+  @@unique([verseId, userId])
+  @@map("verse_bookmarks")
+}
+
+model VerseComment {
+  id        String   @id @default(cuid())
+  verseId   String
+  verse     BibleVerse @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      Member   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("verse_comments")
+}
+
+// ============ NOTIFICATIONS ============
+// (Keep all notification models as they are)
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  message   String
+  data      String?
+  
+  userId    String
+  user      Member   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  isRead    Boolean  @default(false)
+  isArchived Boolean @default(false)
+  
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      Member   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  emailEnabled     Boolean @default(true)
+  inAppEnabled     Boolean @default(true)
+  
+  groupMessages    Boolean @default(true)  // 👈 UPDATED
+  prayerResponses  Boolean @default(true)
+  versePublished   Boolean @default(true)
+  groupInvites     Boolean @default(true)
+  announcements    Boolean @default(true)
+  
+  quietHoursEnabled Boolean @default(false)
+  quietHoursStart  Int?
+  quietHoursEnd    Int?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([userId])
+  @@map("notification_preferences")
 }

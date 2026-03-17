@@ -25,14 +25,31 @@ export class MembersService {
   async getProfile(userId: string) {
     const member = await this.prisma.member.findUnique({
       where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        avatarUrl: true,
+        bio: true,
+        age: true,
+        gender: true,
+        locationName: true,        // ✅ Include location fields
+        locationPrivacy: true,
+        locationLastUpdated: true,
+        isAdmin: true,
+        isSuspended: true,
+        createdAt: true,
+        lastActiveAt: true,
+        // Add any other fields you want to expose
+      }
     });
 
     if (!member) {
       throw new NotFoundException('Member not found');
     }
 
-    const { password, ...profile } = member;
-    return profile;
+    return member;
   }
 
   async updateProfile(userId: string, updateData: UpdateProfileDto) {
@@ -60,7 +77,7 @@ export class MembersService {
     }
   
     // Prepare data for update
-    const { currentPassword, newPassword, ...cleanData } = updateData;
+    const { currentPassword, newPassword, locationName, locationPrivacy, ...cleanData } = updateData;
     
     const dataToUpdate: any = { ...cleanData };
     
@@ -68,15 +85,76 @@ export class MembersService {
     if (updateData.newPassword) {
       dataToUpdate.password = updateData.newPassword;
     }
+
+    // Handle location update
+    if (locationName !== undefined) {
+      dataToUpdate.locationName = locationName;
+      dataToUpdate.locationLastUpdated = new Date();
+    }
+
+    if (locationPrivacy !== undefined) {
+      dataToUpdate.locationPrivacy = locationPrivacy;
+      dataToUpdate.locationLastUpdated = new Date();
+    }
   
     const updated = await this.prisma.member.update({
       where: { id: userId },
       data: dataToUpdate,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        avatarUrl: true,
+        bio: true,
+        age: true,
+        gender: true,
+        locationName: true,
+        locationPrivacy: true,
+        locationLastUpdated: true,
+        isAdmin: true,
+        isSuspended: true,
+        createdAt: true,
+        lastActiveAt: true,
+      }
     });
   
-    const { password, ...profile } = updated;
-    return profile;
+    return updated;
   }
+
+  // ============ NEW: DEDICATED LOCATION UPDATE ============
+  
+  async updateLocation(
+    userId: string, 
+    locationData: { locationName?: string; locationPrivacy?: 'exact' | 'city' | 'country' | 'none' }
+  ) {
+    const member = await this.prisma.member.findUnique({
+      where: { id: userId }
+    });
+
+    if (!member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    const updated = await this.prisma.member.update({
+      where: { id: userId },
+      data: {
+        locationName: locationData.locationName,
+        locationPrivacy: locationData.locationPrivacy,
+        locationLastUpdated: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+        locationName: true,
+        locationPrivacy: true,
+        locationLastUpdated: true,
+      }
+    });
+
+    return updated;
+  }
+
   async updateProfilePicture(userId: string, avatarUrl: string): Promise<Member> {
     return this.prisma.member.update({
       where: { id: userId },
@@ -114,5 +192,4 @@ export class MembersService {
 
     return { message: 'Password updated successfully' };
   }
-
 }

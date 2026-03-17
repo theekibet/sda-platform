@@ -132,7 +132,6 @@ function AdminDashboard() {
             <div style={styles.statIcon}>📝</div>
             <div>
               <h3 style={styles.statTitle}>Forum Posts</h3>
-              <p style={styles.statNumber}>{stats.content.forumPosts}</p>
             </div>
           </div>
           <div style={styles.statCard}>

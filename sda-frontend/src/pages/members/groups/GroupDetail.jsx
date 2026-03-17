@@ -1,57 +1,132 @@
 // src/pages/members/groups/GroupDetail.jsx
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
-import { 
-  getGroupById, 
-  leaveGroup, 
-  approveMember, 
-  rejectMember,
-  getGroupDiscussions,
-  createDiscussion,
-  joinGroup
-} from '../../../services/api';
+import { useParams, useNavigate } from 'react-router-dom';
+import { groupsService } from '../../../services/groupsService';
 import { getCategoryIcon, getCategoryLabel } from '../../../utils/groupCategories';
 import GroupChat from './GroupChat';
+import GroupEvents from '../../../components/groups/GroupEvents'; // NEW IMPORT
+import MessageReactions from '../../../components/groups/MessageReactions';
+import './Group.css';
 
-function GroupDetail({ groupId, onBack }) {
+function GroupDetail({ groupId: propGroupId, onBack }) {
   const { user } = useAuth();
+  const params = useParams();
+  const navigate = useNavigate();
+  
+  // Check both params.id and params.groupId
+  const groupId = propGroupId || params?.id || params?.groupId;
+  
   const [group, setGroup] = useState(null);
-  const [discussions, setDiscussions] = useState([]);
-  const [selectedDiscussion, setSelectedDiscussion] = useState(null);
   const [activeTab, setActiveTab] = useState('about');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
-  const [showDiscussionForm, setShowDiscussionForm] = useState(false);
-  const [newDiscussion, setNewDiscussion] = useState({
-    title: '',
-    content: '',
-  });
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [loadingPinned, setLoadingPinned] = useState(false);
 
   useEffect(() => {
-    fetchGroupData();
+    console.log('🔍 GroupDetail useEffect triggered');
+    console.log('📍 Final groupId:', groupId);
+    
+    if (groupId) {
+      console.log('✅ GroupId exists, fetching data...');
+      fetchGroupData();
+      fetchPinnedMessages();
+    } else {
+      console.log('❌ No groupId found');
+      setLoading(false);
+    }
+
+    // Set up polling for unread count
+    const interval = setInterval(() => {
+      if (groupId && group?.userMembership?.status === 'approved') {
+        fetchUnreadCount();
+      }
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(interval);
   }, [groupId]);
 
   const fetchGroupData = async () => {
+    if (!groupId) return;
+    
     setLoading(true);
+    setError(null);
+    
     try {
-      const groupRes = await getGroupById(groupId);
-      setGroup(groupRes.data);
+      console.log('📡 Fetching group with ID:', groupId);
+      const response = await groupsService.getGroupById(groupId);
+      console.log('✅ Group response:', response);
       
-      const discussionsRes = await getGroupDiscussions(groupId);
-      setDiscussions(discussionsRes.data.discussions || []);
+      // Handle response structure
+      const actualGroupData = response.data?.data || response.data;
+      console.log('🎯 Actual group data:', actualGroupData);
+      setGroup(actualGroupData);
+      
+      // Set initial unread count
+      if (actualGroupData.unreadCount !== undefined) {
+        setUnreadCount(actualGroupData.unreadCount);
+      }
+      
     } catch (error) {
-      console.error('Error fetching group:', error);
+      console.error('❌ Error fetching group:', error);
+      
+      if (error.response?.status === 404) {
+        setError('Group not found');
+      } else if (error.response?.status === 403) {
+        setError('You do not have access to this group');
+      } else {
+        setError('Failed to load group');
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchPinnedMessages = async () => {
+    if (!groupId) return;
+    
+    setLoadingPinned(true);
+    try {
+      const response = await groupsService.getPinnedMessages(groupId);
+      const messages = response.data?.data || response.data || [];
+      setPinnedMessages(messages);
+    } catch (error) {
+      console.error('Error fetching pinned messages:', error);
+    } finally {
+      setLoadingPinned(false);
+    }
+  };
+
+  const fetchUnreadCount = async () => {
+    if (!groupId) return;
+    
+    try {
+      const response = await groupsService.getGroupById(groupId);
+      const actualGroupData = response.data?.data || response.data;
+      
+      if (actualGroupData.unreadCount !== undefined) {
+        setUnreadCount(actualGroupData.unreadCount);
+      }
+    } catch (error) {
+      console.error('Error fetching unread count:', error);
+    }
+  };
+
   const handleLeaveGroup = async () => {
+    if (!groupId) return;
+    
     if (window.confirm('Are you sure you want to leave this group?')) {
       try {
-        await leaveGroup(groupId);
-        onBack(); // Go back to groups list
+        await groupsService.leaveGroup(groupId);
+        if (onBack) {
+          onBack();
+        } else {
+          navigate('/groups');
+        }
       } catch (error) {
         alert(error.response?.data?.message || 'Error leaving group');
       }
@@ -59,8 +134,10 @@ function GroupDetail({ groupId, onBack }) {
   };
 
   const handleApproveMember = async (memberId) => {
+    if (!groupId) return;
+    
     try {
-      await approveMember(groupId, memberId);
+      await groupsService.approveMember(groupId, memberId);
       fetchGroupData();
     } catch (error) {
       alert('Error approving member');
@@ -68,87 +145,160 @@ function GroupDetail({ groupId, onBack }) {
   };
 
   const handleRejectMember = async (memberId) => {
+    if (!groupId) return;
+    
     try {
-      await rejectMember(groupId, memberId);
+      await groupsService.rejectMember(groupId, memberId);
       fetchGroupData();
     } catch (error) {
       alert('Error rejecting member');
     }
   };
 
-  const handleCreateDiscussion = async (e) => {
-    e.preventDefault();
+  const handleJoinRequest = async () => {
+    if (!groupId) return;
+    
     try {
-      await createDiscussion({
-        ...newDiscussion,
-        groupId,
-      });
-      setNewDiscussion({ title: '', content: '' });
-      setShowDiscussionForm(false);
-      const discussionsRes = await getGroupDiscussions(groupId);
-      setDiscussions(discussionsRes.data.discussions || []);
+      await groupsService.joinGroup(groupId, joinMessage);
+      setShowJoinForm(false);
+      fetchGroupData();
     } catch (error) {
-      alert('Error creating discussion');
+      alert('Error sending request');
     }
   };
 
-  const handleBackFromChat = () => {
-    setSelectedDiscussion(null);
-    fetchGroupData(); // Refresh discussions list
+  const handleBackToGroups = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      navigate('/groups');
+    }
   };
 
-  const isAdmin = group?.userMembership?.role === 'admin' || group?.userMembership?.role === 'moderator';
-  const isMember = group?.userMembership?.status === 'approved';
-  const isPending = group?.userMembership?.status === 'pending';
+  const handleChatTabClick = () => {
+    setActiveTab('chat');
+    // Mark as read when opening chat
+    if (groupId && group?.userMembership?.status === 'approved') {
+      groupsService.markAsRead(groupId).catch(console.error);
+      setUnreadCount(0);
+    }
+  };
 
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffHours = Math.floor((now - date) / (1000 * 60 * 60));
+    
+    if (diffHours < 1) return 'Just now';
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffHours < 48) return 'Yesterday';
+    return date.toLocaleDateString();
+  };
+
+  // No group ID state
+  if (!groupId) {
+    return (
+      <div className="groups-container">
+        <div className="groups-empty-state">
+          <p className="groups-empty-text">No group selected</p>
+          <button 
+            onClick={handleBackToGroups}
+            className="groups-create-button"
+          >
+            ← Back to Groups
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state
   if (loading) {
-    return <div style={styles.loading}>Loading group...</div>;
+    return (
+      <div className="groups-loading">
+        Loading group...
+      </div>
+    );
   }
 
-  if (!group) {
-    return <div style={styles.error}>Group not found</div>;
+  // Error state
+  if (error) {
+    return (
+      <div className="groups-container">
+        <div className="groups-empty-state">
+          <p className="groups-empty-text">{error}</p>
+          <button 
+            onClick={handleBackToGroups}
+            className="groups-create-button"
+          >
+            ← Back to Groups
+          </button>
+        </div>
+      </div>
+    );
   }
+
+  // No group data
+  if (!group) {
+    return (
+      <div className="groups-loading">
+        No group data...
+      </div>
+    );
+  }
+
+  // Check membership status
+  const isMember = group.userMembership?.status === 'approved';
+  const isPending = group.userMembership?.status === 'pending';
+  const isAdmin = group.userMembership?.role === 'admin';
 
   return (
-    <div style={styles.container}>
+    <div className="group-detail-container">
       {/* Header */}
-      <div style={styles.header}>
-        <button onClick={onBack} style={styles.backButton}>
+      <div className="group-detail-header">
+        <button onClick={handleBackToGroups} className="group-detail-back-button">
           ← Back to Groups
         </button>
-        
         {isMember && (
-          <button onClick={handleLeaveGroup} style={styles.leaveButton}>
+          <button onClick={handleLeaveGroup} className="group-detail-leave-button">
             Leave Group
           </button>
         )}
       </div>
 
       {/* Group Info Card */}
-      <div style={styles.groupCard}>
-        <div style={styles.groupHeader}>
+      <div className="group-detail-card">
+        <div className="group-detail-header-info">
           <div>
-            <span style={styles.category}>
+            <span className="group-detail-category">
               {getCategoryIcon(group.category)} {getCategoryLabel(group.category)}
             </span>
             {group.isPrivate && (
-              <span style={styles.privateBadge}>🔒 Private Group</span>
+              <span className="group-detail-private-badge">🔒 Private Group</span>
             )}
           </div>
-          <h1 style={styles.groupName}>{group.name}</h1>
-          <p style={styles.groupMeta}>
-            <span>👥 {group.memberCount} members</span>
+          <h1 className="group-detail-name">{group.name}</h1>
+          <p className="group-detail-meta">
+            <span>👥 {group.memberCount || 0} members</span>
             {group.location && <span>📍 {group.location}</span>}
+            {group.meetingType && (
+              <span>
+                {group.meetingType === 'online' && '💻 Online'}
+                {group.meetingType === 'in-person' && '🤝 In-Person'}
+                {group.meetingType === 'hybrid' && '🔄 Hybrid'}
+              </span>
+            )}
             <span>📅 Created {new Date(group.createdAt).toLocaleDateString()}</span>
+            <span>💬 {group.messageCount || 0} messages</span>
           </p>
         </div>
 
         {!isMember && !isPending && (
-          <div style={styles.joinSection}>
-            <p style={styles.joinText}>Want to join this group?</p>
+          <div className="group-detail-join-section">
+            <p className="group-detail-join-text">Want to join this group?</p>
             <button
               onClick={() => setShowJoinForm(true)}
-              style={styles.joinButton}
+              className="group-detail-join-button"
             >
               Request to Join
             </button>
@@ -156,41 +306,33 @@ function GroupDetail({ groupId, onBack }) {
         )}
 
         {isPending && (
-          <div style={styles.pendingSection}>
-            <span style={styles.pendingBadge}>⏳ Membership Pending Approval</span>
+          <div className="group-detail-pending-section">
+            <span className="group-detail-pending-badge">⏳ Membership Pending Approval</span>
           </div>
         )}
       </div>
 
       {/* Join Request Form */}
       {showJoinForm && (
-        <div style={styles.joinForm}>
-          <h3 style={styles.formTitle}>Request to Join</h3>
+        <div className="group-detail-join-form">
+          <h3 className="group-detail-form-title">Request to Join</h3>
           <textarea
             value={joinMessage}
             onChange={(e) => setJoinMessage(e.target.value)}
             placeholder="Optional message to the group admins..."
-            style={styles.textarea}
+            className="group-detail-textarea"
             rows="3"
           />
-          <div style={styles.formButtons}>
+          <div className="group-detail-form-buttons">
             <button
               onClick={() => setShowJoinForm(false)}
-              style={styles.cancelButton}
+              className="group-detail-cancel-button"
             >
               Cancel
             </button>
             <button
-              onClick={async () => {
-                try {
-                  await joinGroup(groupId, joinMessage);
-                  setShowJoinForm(false);
-                  fetchGroupData();
-                } catch (error) {
-                  alert('Error sending request');
-                }
-              }}
-              style={styles.submitButton}
+              onClick={handleJoinRequest}
+              className="group-detail-submit-button"
             >
               Send Request
             </button>
@@ -198,171 +340,251 @@ function GroupDetail({ groupId, onBack }) {
         </div>
       )}
 
-      {/* Tabs */}
-      <div style={styles.tabs}>
+      {/* Tabs with unread badge */}
+      <div className="group-detail-tabs">
         <button
           onClick={() => setActiveTab('about')}
-          style={{
-            ...styles.tab,
-            ...(activeTab === 'about' ? styles.activeTab : {}),
-          }}
+          className={`group-detail-tab ${activeTab === 'about' ? 'group-detail-tab-active' : ''}`}
         >
-          About
+          📋 About
         </button>
         <button
-          onClick={() => setActiveTab('discussions')}
-          style={{
-            ...styles.tab,
-            ...(activeTab === 'discussions' ? styles.activeTab : {}),
-          }}
+          onClick={handleChatTabClick}
+          className={`group-detail-tab ${activeTab === 'chat' ? 'group-detail-tab-active' : ''}`}
+          style={{ position: 'relative' }}
         >
-          Chat {discussions.length > 0 ? `(${discussions.length})` : ''}
+          💬 Chat
+          {unreadCount > 0 && activeTab !== 'chat' && (
+            <span style={styles.unreadBadge}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </button>
+        {/* NEW EVENTS TAB - Visible to all members */}
+        {isMember && (
+          <button
+            onClick={() => setActiveTab('events')}
+            className={`group-detail-tab ${activeTab === 'events' ? 'group-detail-tab-active' : ''}`}
+          >
+            📅 Events
+          </button>
+        )}
         {isAdmin && (
           <button
             onClick={() => setActiveTab('members')}
-            style={{
-              ...styles.tab,
-              ...(activeTab === 'members' ? styles.activeTab : {}),
-            }}
+            className={`group-detail-tab ${activeTab === 'members' ? 'group-detail-tab-active' : ''}`}
           >
-            Members
+            👥 Members ({group.members?.length || 0})
           </button>
         )}
       </div>
 
       {/* Tab Content */}
-      <div style={styles.content}>
+      <div className="group-detail-content">
         {activeTab === 'about' && (
-          <div style={styles.aboutSection}>
-            <h3 style={styles.sectionTitle}>About this Group</h3>
-            <p style={styles.description}>{group.description}</p>
+          <div>
+            <h3 className="groups-special-title">About this Group</h3>
+            <p className="group-card-description">{group.description}</p>
             
-            {group.rules && (
+            {/* Pinned Messages Section */}
+            {isMember && pinnedMessages.length > 0 && (
               <>
-                <h3 style={styles.sectionTitle}>Group Rules</h3>
-                <p style={styles.rules}>{group.rules}</p>
+                <h3 className="groups-special-title">📌 Pinned Messages</h3>
+                <div style={styles.pinnedMessages}>
+                  {pinnedMessages.map(message => (
+                    <div key={message.id} style={styles.pinnedMessage}>
+                      <div style={styles.pinnedMessageHeader}>
+                        <span style={styles.pinnedMessageAuthor}>
+                          {message.author?.name}
+                        </span>
+                        <span style={styles.pinnedMessageDate}>
+                          {formatDate(message.createdAt)}
+                        </span>
+                      </div>
+                      <p style={styles.pinnedMessageContent}>
+                        {message.content}
+                      </p>
+                      {message.reactions && message.reactions.length > 0 && (
+                        <div style={styles.pinnedMessageReactions}>
+                          {Object.entries(
+                            message.reactions.reduce((acc, r) => {
+                              acc[r.reaction] = (acc[r.reaction] || 0) + 1;
+                              return acc;
+                            }, {})
+                          ).map(([reaction, count]) => (
+                            <span key={reaction} style={styles.pinnedReaction}>
+                              {reaction === 'like' && '👍'}
+                              {reaction === 'love' && '❤️'}
+                              {reaction === 'pray' && '🙏'}
+                              {reaction === 'amen' && '🙌'}
+                              {reaction === 'thanks' && '🎉'} {count}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </>
             )}
             
-            <h3 style={styles.sectionTitle}>Created By</h3>
-            <p style={styles.creator}>{group.createdBy?.name}</p>
+            {group.rules && (
+              <>
+                <h3 className="groups-special-title">Group Rules</h3>
+                <p className="group-card-description">{group.rules}</p>
+              </>
+            )}
+            
+            <h3 className="groups-special-title">Created By</h3>
+            <div style={styles.creatorInfo}>
+              {group.createdBy?.avatarUrl ? (
+                <img 
+                  src={group.createdBy.avatarUrl} 
+                  alt={group.createdBy.name}
+                  style={styles.creatorAvatar}
+                />
+              ) : (
+                <div style={styles.creatorAvatarPlaceholder}>
+                  {group.createdBy?.name?.charAt(0) || '?'}
+                </div>
+              )}
+              <span style={styles.creatorName}>{group.createdBy?.name}</span>
+            </div>
+
+            {/* Meeting Info */}
+            {group.meetingType && (
+              <>
+                <h3 className="groups-special-title">Meeting Info</h3>
+                <div style={styles.meetingInfo}>
+                  <p>
+                    <strong>Type:</strong>{' '}
+                    {group.meetingType === 'online' && '💻 Online'}
+                    {group.meetingType === 'in-person' && '🤝 In-Person'}
+                    {group.meetingType === 'hybrid' && '🔄 Hybrid'}
+                  </p>
+                  {group.isLocationBased && (
+                    <p>
+                      <strong>Location Specific:</strong> Yes - This group serves a specific area
+                    </p>
+                  )}
+                  {group.location && (
+                    <p>
+                      <strong>Location:</strong> {group.location}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {activeTab === 'discussions' && isMember ? (
-          <div>
-            {selectedDiscussion ? (
-              // Show GroupChat when a discussion is selected
-              <GroupChat
-                discussionId={selectedDiscussion.id}
-                groupName={group.name}
-                onBack={handleBackFromChat}
-              />
-            ) : (
-              // Show discussions list
-              <div>
-                <div style={styles.discussionHeader}>
-                  <h3 style={styles.sectionTitle}>Chat Rooms</h3>
-                  <button
-                    onClick={() => setShowDiscussionForm(!showDiscussionForm)}
-                    style={styles.newDiscussionButton}
-                  >
-                    {showDiscussionForm ? 'Cancel' : '+ New Chat Room'}
-                  </button>
-                </div>
-
-                {showDiscussionForm && (
-                  <form onSubmit={handleCreateDiscussion} style={styles.discussionForm}>
-                    <input
-                      type="text"
-                      placeholder="Chat Room Title"
-                      value={newDiscussion.title}
-                      onChange={(e) => setNewDiscussion({...newDiscussion, title: e.target.value})}
-                      required
-                      style={styles.input}
-                    />
-                    <textarea
-                      placeholder="What's this chat room about?"
-                      value={newDiscussion.content}
-                      onChange={(e) => setNewDiscussion({...newDiscussion, content: e.target.value})}
-                      required
-                      style={styles.textarea}
-                      rows="4"
-                    />
-                    <button type="submit" style={styles.submitButton}>
-                      Create Chat Room
-                    </button>
-                  </form>
-                )}
-
-                <div style={styles.discussionsList}>
-                  {discussions.length === 0 ? (
-                    <p style={styles.emptyText}>No chat rooms yet. Create the first one!</p>
-                  ) : (
-                    discussions.map(disc => (
-                      <div
-                        key={disc.id}
-                        onClick={() => setSelectedDiscussion(disc)}
-                        style={styles.discussionCard}
-                      >
-                        <h4 style={styles.discussionTitle}>{disc.title}</h4>
-                        <p style={styles.discussionPreview}>
-                          {disc.content.substring(0, 100)}...
-                        </p>
-                        <div style={styles.discussionMeta}>
-                          <span>By {disc.author?.name}</span>
-                          <span>💬 {disc.replyCount || 0} messages</span>
-                          <span>{new Date(disc.createdAt).toLocaleDateString()}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : activeTab === 'discussions' && !isMember ? (
-          <div style={styles.privateMessage}>
-            <p>Join this group to participate in chats.</p>
+        {/* Chat Tab */}
+        {activeTab === 'chat' && isMember ? (
+          <GroupChat
+            groupId={groupId}
+            groupName={group.name}
+            onBack={() => setActiveTab('about')}
+          />
+        ) : activeTab === 'chat' && !isMember ? (
+          <div className="groups-empty-state">
+            <p className="groups-empty-text">
+              {isPending 
+                ? 'Your membership is pending approval. You can join the chat once approved.'
+                : 'Join this group to participate in the chat.'}
+            </p>
           </div>
         ) : null}
 
+        {/* NEW EVENTS TAB CONTENT */}
+        {activeTab === 'events' && isMember && (
+          <GroupEvents 
+            groupId={groupId} 
+            isAdmin={isAdmin}
+          />
+        )}
+
+        {/* Members Tab */}
         {activeTab === 'members' && isAdmin && (
           <div>
-            <h3 style={styles.sectionTitle}>Members</h3>
+            <h3 className="groups-special-title">Members</h3>
             <div style={styles.membersList}>
-              {group.members?.map(member => (
-                <div key={member.id} style={styles.memberCard}>
-                  <div style={styles.memberInfo}>
-                    <span style={styles.memberName}>{member.member.name}</span>
-                    <span style={styles.memberRole}>
-                      {member.role === 'admin' ? '👑 Admin' : 
-                       member.role === 'moderator' ? '🛡️ Moderator' : 'Member'}
-                    </span>
-                    {member.status === 'pending' && (
-                      <span style={styles.pendingBadge}>Pending</span>
-                    )}
-                  </div>
-                  
-                  {member.status === 'pending' && (
-                    <div style={styles.memberActions}>
-                      <button
-                        onClick={() => handleApproveMember(member.memberId)}
-                        style={styles.approveButton}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleRejectMember(member.memberId)}
-                        style={styles.rejectButton}
-                      >
-                        Reject
-                      </button>
+              {/* Pending members first */}
+              {group.members?.filter(m => m.status === 'pending').length > 0 && (
+                <>
+                  <h4 style={styles.membersSubtitle}>⏳ Pending Approval</h4>
+                  {group.members
+                    .filter(m => m.status === 'pending')
+                    .map(member => (
+                      <div key={member.id} className="group-card" style={styles.memberCard}>
+                        <div style={styles.memberInfo}>
+                          <div style={styles.memberAvatar}>
+                            {member.member.avatarUrl ? (
+                              <img src={member.member.avatarUrl} alt={member.member.name} style={styles.memberAvatarImg} />
+                            ) : (
+                              <div style={styles.memberAvatarPlaceholder}>
+                                {member.member.name?.charAt(0)}
+                              </div>
+                            )}
+                          </div>
+                          <div style={styles.memberDetails}>
+                            <span style={styles.memberName}>{member.member.name}</span>
+                            <span style={styles.memberRole}>
+                              {member.role === 'admin' ? '👑 Admin' : 
+                               member.role === 'moderator' ? '🛡️ Moderator' : 'Member'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div style={styles.memberActions}>
+                          <button
+                            onClick={() => handleApproveMember(member.memberId)}
+                            className="group-card-join-button"
+                            style={styles.approveButton}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleRejectMember(member.memberId)}
+                            className="group-detail-leave-button"
+                            style={styles.rejectButton}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </>
+              )}
+
+              {/* Approved members */}
+              <h4 style={styles.membersSubtitle}>✅ Members</h4>
+              {group.members
+                ?.filter(m => m.status === 'approved')
+                .map(member => (
+                  <div key={member.id} className="group-card" style={styles.memberCard}>
+                    <div style={styles.memberInfo}>
+                      <div style={styles.memberAvatar}>
+                        {member.member.avatarUrl ? (
+                          <img src={member.member.avatarUrl} alt={member.member.name} style={styles.memberAvatarImg} />
+                        ) : (
+                          <div style={styles.memberAvatarPlaceholder}>
+                            {member.member.name?.charAt(0)}
+                          </div>
+                        )}
+                      </div>
+                      <div style={styles.memberDetails}>
+                        <span style={styles.memberName}>{member.member.name}</span>
+                        <span style={styles.memberRole}>
+                          {member.role === 'admin' ? '👑 Admin' : 
+                           member.role === 'moderator' ? '🛡️ Moderator' : 'Member'}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                    <div style={styles.memberJoined}>
+                      Joined {new Date(member.joinedAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -371,306 +593,169 @@ function GroupDetail({ groupId, onBack }) {
   );
 }
 
+// Additional styles not covered by CSS
 const styles = {
-  container: {
-    maxWidth: '900px',
-    margin: '0 auto',
-    padding: '20px',
-  },
-  loading: {
-    textAlign: 'center',
-    padding: '50px',
-    color: '#666',
-  },
-  error: {
-    textAlign: 'center',
-    padding: '50px',
-    color: '#c33',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '20px',
-  },
-  backButton: {
-    padding: '8px 16px',
-    backgroundColor: '#f0f0f0',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  leaveButton: {
-    padding: '8px 16px',
-    backgroundColor: '#dc3545',
+  unreadBadge: {
+    position: 'absolute',
+    top: '-5px',
+    right: '-5px',
+    backgroundColor: '#ff4444',
     color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  groupCard: {
-    backgroundColor: 'white',
     borderRadius: '10px',
-    padding: '30px',
-    marginBottom: '20px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-  },
-  groupHeader: {
-    marginBottom: '20px',
-  },
-  category: {
-    fontSize: '12px',
-    color: '#667eea',
-    backgroundColor: '#f0f4ff',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    marginRight: '10px',
-  },
-  privateBadge: {
-    fontSize: '11px',
-    color: '#f59e0b',
-    backgroundColor: '#fff3e0',
     padding: '2px 6px',
-    borderRadius: '3px',
-  },
-  groupName: {
-    margin: '10px 0',
-    color: '#333',
-    fontSize: '28px',
-  },
-  groupMeta: {
-    display: 'flex',
-    gap: '20px',
-    color: '#666',
-    fontSize: '14px',
-  },
-  joinSection: {
+    fontSize: '10px',
+    minWidth: '16px',
     textAlign: 'center',
-    padding: '20px',
-    backgroundColor: '#f0f4ff',
-    borderRadius: '8px',
   },
-  joinText: {
-    marginBottom: '10px',
-    color: '#333',
-  },
-  joinButton: {
-    padding: '10px 20px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '16px',
-  },
-  pendingSection: {
-    textAlign: 'center',
-    padding: '15px',
-    backgroundColor: '#fff3e0',
-    borderRadius: '8px',
-  },
-  pendingBadge: {
-    color: '#f59e0b',
-    fontWeight: 'bold',
-  },
-  joinForm: {
-    backgroundColor: 'white',
-    padding: '20px',
-    borderRadius: '10px',
-    marginBottom: '20px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-  },
-  formTitle: {
-    margin: '0 0 15px 0',
-    color: '#333',
-  },
-  textarea: {
-    width: '100%',
-    padding: '10px',
-    marginBottom: '15px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-    fontSize: '14px',
-    fontFamily: 'inherit',
-  },
-  formButtons: {
-    display: 'flex',
-    gap: '10px',
-    justifyContent: 'flex-end',
-  },
-  cancelButton: {
-    padding: '8px 16px',
-    backgroundColor: '#f0f0f0',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  submitButton: {
-    padding: '8px 16px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  tabs: {
-    display: 'flex',
-    gap: '10px',
-    marginBottom: '20px',
-  },
-  tab: {
-    padding: '10px 20px',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    backgroundColor: '#f0f0f0',
-    color: '#666',
-  },
-  activeTab: {
-    backgroundColor: '#667eea',
-    color: 'white',
-  },
-  content: {
-    backgroundColor: 'white',
-    borderRadius: '10px',
-    padding: '30px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-  },
-  aboutSection: {
-    lineHeight: '1.6',
-  },
-  sectionTitle: {
-    color: '#333',
-    marginBottom: '15px',
-  },
-  description: {
-    color: '#666',
-    marginBottom: '30px',
-  },
-  rules: {
-    color: '#666',
-    marginBottom: '30px',
-    padding: '15px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '5px',
-  },
-  creator: {
-    color: '#667eea',
-  },
-  discussionHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '20px',
-  },
-  newDiscussionButton: {
-    padding: '8px 16px',
-    backgroundColor: '#667eea',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  discussionForm: {
-    marginBottom: '30px',
-    padding: '20px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '8px',
-  },
-  input: {
-    width: '100%',
-    padding: '10px',
-    marginBottom: '15px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-    fontSize: '14px',
-  },
-  discussionsList: {
+  pinnedMessages: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '15px',
+    gap: '12px',
+    marginBottom: '20px',
   },
-  discussionCard: {
-    padding: '15px',
-    backgroundColor: '#f9f9f9',
+  pinnedMessage: {
+    backgroundColor: '#fff9c4',
+    padding: '12px',
     borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'transform 0.2s, box-shadow 0.2s',
-    ':hover': {
-      transform: 'translateY(-2px)',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-    },
+    border: '1px solid #ffe082',
   },
-  discussionTitle: {
-    margin: '0 0 10px 0',
+  pinnedMessageHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '6px',
+  },
+  pinnedMessageAuthor: {
+    fontWeight: '600',
+    color: '#333',
+    fontSize: '13px',
+  },
+  pinnedMessageDate: {
+    fontSize: '11px',
+    color: '#999',
+  },
+  pinnedMessageContent: {
+    margin: '0 0 8px 0',
+    fontSize: '14px',
     color: '#333',
   },
-  discussionPreview: {
-    color: '#666',
-    marginBottom: '10px',
-  },
-  discussionMeta: {
+  pinnedMessageReactions: {
     display: 'flex',
-    gap: '15px',
+    gap: '8px',
+  },
+  pinnedReaction: {
     fontSize: '12px',
-    color: '#999',
+    backgroundColor: 'rgba(255,255,255,0.5)',
+    padding: '2px 6px',
+    borderRadius: '12px',
   },
-  emptyText: {
-    textAlign: 'center',
-    color: '#999',
-    padding: '40px',
+  creatorInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    marginTop: '10px',
   },
-  privateMessage: {
-    textAlign: 'center',
-    padding: '40px',
-    color: '#666',
+  creatorAvatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '20px',
+    objectFit: 'cover',
+  },
+  creatorAvatarPlaceholder: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '20px',
+    backgroundColor: '#667eea',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+    fontWeight: '600',
+  },
+  creatorName: {
+    fontSize: '16px',
+    fontWeight: '500',
+    color: '#333',
+  },
+  meetingInfo: {
+    backgroundColor: '#f9f9f9',
+    padding: '15px',
+    borderRadius: '8px',
+    marginTop: '10px',
   },
   membersList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '10px',
+    gap: '15px',
+  },
+  membersSubtitle: {
+    margin: '10px 0 5px 0',
+    color: '#666',
+    fontSize: '14px',
   },
   memberCard: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '15px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '8px',
+    padding: '12px',
   },
   memberInfo: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
+    gap: '12px',
+  },
+  memberAvatar: {
+    width: '36px',
+    height: '36px',
+  },
+  memberAvatarImg: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '18px',
+    objectFit: 'cover',
+  },
+  memberAvatarPlaceholder: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '18px',
+    backgroundColor: '#667eea',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '16px',
+    fontWeight: '600',
+  },
+  memberDetails: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
   },
   memberName: {
-    fontWeight: '500',
+    fontSize: '14px',
+    fontWeight: '600',
     color: '#333',
   },
   memberRole: {
     fontSize: '12px',
-    color: '#667eea',
+    color: '#666',
   },
   memberActions: {
     display: 'flex',
-    gap: '10px',
+    gap: '8px',
   },
   approveButton: {
-    padding: '5px 10px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
+    padding: '6px 12px',
     fontSize: '12px',
   },
   rejectButton: {
-    padding: '5px 10px',
-    backgroundColor: '#dc3545',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
+    padding: '6px 12px',
     fontSize: '12px',
+    backgroundColor: '#dc3545',
+  },
+  memberJoined: {
+    fontSize: '11px',
+    color: '#999',
   },
 };
 

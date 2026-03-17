@@ -1,10 +1,12 @@
 // src/pages/members/Home.jsx
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { getForumPosts, getLocationStats } from '../../services/api';
+import { getLocationStats } from '../../services/api';
+import { groupsService } from '../../services/groupsService';
+
 function Home() {
   const { user } = useAuth();
-  const [posts, setPosts] = useState([]);
+  const [recentDiscussions, setRecentDiscussions] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -14,11 +16,13 @@ function Home() {
 
   const fetchData = async () => {
     try {
-      const [postsRes, statsRes] = await Promise.all([
-        getForumPosts(),
+      // Fetch recent discussions from groups (instead of forum)
+      const [discussionsRes, statsRes] = await Promise.all([
+        groupsService.getTrendingDiscussions(),
         user?.city ? getLocationStats(user.city) : Promise.resolve({ data: null })
       ]);
-      setPosts(postsRes.data);
+      
+      setRecentDiscussions(discussionsRes.data || []);
       setStats(statsRes.data);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -44,8 +48,8 @@ function Home() {
       {/* Stats Grid */}
       <div style={styles.statsGrid}>
         <div style={styles.statCard}>
-          <span style={styles.statValue}>{posts.length}</span>
-          <span style={styles.statLabel}>Forum Posts</span>
+          <span style={styles.statValue}>{recentDiscussions.length}</span>
+          <span style={styles.statLabel}>Recent Discussions</span>
         </div>
         {stats && (
           <div style={styles.statCard}>
@@ -55,43 +59,49 @@ function Home() {
         )}
       </div>
 
-      {/* Recent Forum Posts */}
+      {/* Trending Discussions */}
       <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>Recent Discussions</h2>
-        {posts.length === 0 ? (
-          <p style={styles.emptyText}>No posts yet. Be the first to start a discussion!</p>
+        <h2 style={styles.sectionTitle}>🔥 Trending Discussions</h2>
+        {recentDiscussions.length === 0 ? (
+          <p style={styles.emptyText}>No discussions yet. Be the first to start one!</p>
         ) : (
-          <div style={styles.postsList}>
-            {posts.slice(0, 5).map(post => (
-              <div key={post.id} style={styles.postCard}>
-                <div style={styles.postHeader}>
-                  <h3 style={styles.postTitle}>{post.title}</h3>
-                  {post.isAnonymous ? (
-                    <span style={styles.anonymousBadge}>Anonymous</span>
-                  ) : (
-                    <span style={styles.authorName}>{post.author?.name}</span>
-                  )}
+          <div style={styles.discussionsList}>
+            {recentDiscussions.slice(0, 5).map(discussion => (
+              <div 
+                key={discussion.id} 
+                style={styles.discussionCard}
+                onClick={() => window.location.href = `/groups/${discussion.groupId}/discussion/${discussion.id}`}
+              >
+                <div style={styles.discussionHeader}>
+                  <h3 style={styles.discussionTitle}>{discussion.title}</h3>
+                  <span style={styles.groupBadge}>{discussion.group?.name || 'General'}</span>
                 </div>
-                <p style={styles.postPreview}>
-                  {post.content.substring(0, 150)}...
+                <p style={styles.discussionPreview}>
+                  {discussion.content?.substring(0, 150)}...
                 </p>
-                <div style={styles.postMeta}>
-                  <span>💬 {post._count?.replies || 0} replies</span>
-                  <span>📍 {post.location || 'No location'}</span>
-                  <span>🕐 {new Date(post.createdAt).toLocaleDateString()}</span>
+                <div style={styles.discussionMeta}>
+                  <span>💬 {discussion.replyCount || 0} replies</span>
+                  <span>👤 {discussion.author?.name || 'Anonymous'}</span>
+                  <span>🕐 {new Date(discussion.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
             ))}
           </div>
         )}
+        <div style={styles.viewAllLink}>
+          <a href="/discover" style={styles.link}>View all discussions →</a>
+        </div>
       </div>
 
       {/* Quick Actions */}
       <div style={styles.quickActions}>
         <h2 style={styles.sectionTitle}>Quick Actions</h2>
         <div style={styles.actionGrid}>
-          <button style={styles.actionButton} onClick={() => window.location.href = '/forum'}>
-            📝 Start Discussion
+          <button style={styles.actionButton} onClick={() => window.location.href = '/discover'}>
+            🔥 Discover Discussions
+          </button>
+          <button style={styles.actionButton} onClick={() => window.location.href = '/groups'}>
+            👥 Browse Groups
           </button>
           <button style={styles.actionButton} onClick={() => window.location.href = '/location'}>
             📍 Find Youth Near Me
@@ -173,49 +183,68 @@ const styles = {
     borderRadius: '8px',
     color: '#999',
   },
-  postsList: {
+  discussionsList: {
     display: 'flex',
     flexDirection: 'column',
     gap: '15px',
   },
-  postCard: {
+  discussionCard: {
     backgroundColor: 'white',
     padding: '20px',
     borderRadius: '10px',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    cursor: 'pointer',
+    transition: 'transform 0.2s, box-shadow 0.2s',
+    ':hover': {
+      transform: 'translateY(-2px)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    },
   },
-  postHeader: {
+  discussionHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: '10px',
   },
-  postTitle: {
+  discussionTitle: {
     margin: 0,
     fontSize: '18px',
     color: '#333',
+    flex: 1,
   },
-  anonymousBadge: {
-    backgroundColor: '#9b59b6',
+  groupBadge: {
+    backgroundColor: '#667eea',
     color: 'white',
-    padding: '4px 8px',
-    borderRadius: '4px',
+    padding: '4px 10px',
+    borderRadius: '20px',
     fontSize: '12px',
+    fontWeight: '500',
+    marginLeft: '10px',
   },
-  authorName: {
-    color: '#667eea',
-    fontSize: '14px',
-  },
-  postPreview: {
+  discussionPreview: {
     color: '#666',
     lineHeight: '1.6',
     marginBottom: '10px',
   },
-  postMeta: {
+  discussionMeta: {
     display: 'flex',
     gap: '20px',
     fontSize: '13px',
     color: '#999',
+    flexWrap: 'wrap',
+  },
+  viewAllLink: {
+    textAlign: 'right',
+    marginTop: '15px',
+  },
+  link: {
+    color: '#667eea',
+    textDecoration: 'none',
+    fontSize: '14px',
+    fontWeight: '500',
+    ':hover': {
+      textDecoration: 'underline',
+    },
   },
   quickActions: {
     marginTop: '40px',
@@ -234,6 +263,9 @@ const styles = {
     fontSize: '16px',
     cursor: 'pointer',
     transition: 'background 0.3s',
+    ':hover': {
+      backgroundColor: '#5a6fd8',
+    },
   },
 };
 

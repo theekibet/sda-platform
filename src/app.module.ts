@@ -6,7 +6,6 @@ import { AppService } from './app.service';
 import { MembersModule } from './modules/members/members.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { LocationModule } from './modules/location/location.module';
-import { ForumModule } from './modules/forum/forum.module';
 import { PrayerModule } from './modules/prayer/prayer.module';
 import { GroupsModule } from './modules/groups/groups.module';
 import { AdminModule } from './modules/admin/admin.module';
@@ -19,8 +18,9 @@ import { SecurityModule } from './modules/security/security.module';
 import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 import { AuditLoggerMiddleware } from './common/middleware/audit-logger.middleware';
 import { BibleModule } from './modules/bible/bible.module';
-
+import { CommunityModule } from './modules/community/community.module'; 
 import { PrismaService } from './prisma.service';
+import { NotificationModule } from './modules/notifications/notification.module';
 
 @Module({
   imports: [
@@ -30,7 +30,6 @@ import { PrismaService } from './prisma.service';
     MembersModule,
     AuthModule,
     LocationModule,
-    ForumModule,
     PrayerModule,
     GroupsModule,
     AdminModule,
@@ -42,6 +41,8 @@ import { PrismaService } from './prisma.service';
     SecurityModule,
     MaintenanceModule,
     BibleModule,
+    CommunityModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [

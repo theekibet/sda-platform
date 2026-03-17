@@ -9,7 +9,7 @@ export class PrayerService {
 
   // ============ PRAYER REQUESTS ============
 
-  async createPrayerRequest(userId: string | null, dto: CreatePrayerRequestDto, city?: string) {
+  async createPrayerRequest(userId: string | null, dto: CreatePrayerRequestDto, locationName?: string) {
     const { content, isAnonymous } = dto;
 
     return this.prisma.prayerRequest.create({
@@ -17,7 +17,7 @@ export class PrayerService {
         content,
         authorId: isAnonymous ? null : userId,
         isAnonymous: isAnonymous || false,
-        city: city,
+        locationName: locationName, // Changed from 'city' to 'locationName'
       },
       include: {
         author: !isAnonymous,
@@ -25,10 +25,10 @@ export class PrayerService {
     });
   }
 
-  async getPrayerRequests(city?: string, page = 1, limit = 20) {
+  async getPrayerRequests(locationName?: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
     
-    const where = city ? { city } : {};
+    const where = locationName ? { locationName } : {}; // Changed from 'city' to 'locationName'
     
     const [requests, total] = await Promise.all([
       this.prisma.prayerRequest.findMany({
@@ -54,7 +54,7 @@ export class PrayerService {
     return {
       requests: requests.map(r => ({
         ...r,
-        prayedCount: r._count.prayers,
+        prayedCount: r._count?.prayers || 0, // Added optional chaining
       })),
       total,
       page,
@@ -96,7 +96,7 @@ export class PrayerService {
 
     return {
       ...request,
-      prayedCount: request._count.prayers,
+      prayedCount: request._count?.prayers || 0, // Added optional chaining
     };
   }
 
@@ -168,7 +168,7 @@ export class PrayerService {
 
     return requests.map(r => ({
       ...r,
-      prayedCount: r._count.prayers,
+      prayedCount: r._count?.prayers || 0, // Added optional chaining
     }));
   }
 
@@ -240,7 +240,7 @@ export class PrayerService {
     return {
       testimonies: testimonies.map(t => ({
         ...t,
-        encouragedCount: t._count.encouragements,
+        encouragedCount: t._count?.encouragements || 0, // Added optional chaining
       })),
       total,
       page,

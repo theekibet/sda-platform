@@ -40,8 +40,6 @@ const ModerationActionModal = ({ item, onClose, onAction }) => {
 
   const getContentTypeLabel = () => {
     switch (item.contentType) {
-      case 'forumPost': return 'forum post';
-      case 'forumReply': return 'forum reply';
       case 'prayerRequest': return 'prayer request';
       case 'testimony': return 'testimony';
       case 'groupDiscussion': return 'group discussion';

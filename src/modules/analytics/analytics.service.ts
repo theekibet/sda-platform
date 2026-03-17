@@ -74,17 +74,16 @@ export class AnalyticsService {
       },
     });
 
-    // Location distribution (top cities)
-    const topCities = await this.prisma.member.groupBy({
-      by: ['city'],
+    // ============ FIXED: Location distribution using locationName ============
+    const topLocations = await this.prisma.member.groupBy({
+      by: ['locationName'],
       _count: true,
       where: {
-        city: { not: null },
-        showLocation: true,
+        locationName: { not: null },
       },
       orderBy: {
         _count: {
-          city: 'desc',
+          locationName: 'desc', // Fixed: changed from 'city' to 'locationName'
         },
       },
       take: 10,
@@ -99,9 +98,10 @@ export class AnalyticsService {
     return {
       ageGroups,
       gender: genderMap,
-      topCities: topCities.map(c => ({
-        city: c.city,
-        count: c._count,
+      // ============ FIXED: Map locationName to city for backward compatibility ============
+      topCities: topLocations.map(l => ({
+        city: l.locationName?.split(',')[0] || 'Unknown', // Extract city name
+        count: l._count,
       })),
     };
   }
@@ -114,27 +114,11 @@ export class AnalyticsService {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    const [forumPosts, forumReplies, prayerRequests, testimonies, groups] = await Promise.all([
-      this.prisma.forumPost.count({ where: { createdAt: { gte: start, lte: end } } }),
-      this.prisma.forumReply.count({ where: { createdAt: { gte: start, lte: end } } }),
+    const [prayerRequests, testimonies, groups] = await Promise.all([
       this.prisma.prayerRequest.count({ where: { createdAt: { gte: start, lte: end } } }),
       this.prisma.testimony.count({ where: { createdAt: { gte: start, lte: end } } }),
       this.prisma.group.count({ where: { createdAt: { gte: start, lte: end } } }),
     ]);
-
-    // Most active forums
-    const topForums = await this.prisma.forumPost.findMany({
-      take: 5,
-      orderBy: {
-        replyCount: 'desc',
-      },
-      select: {
-        id: true,
-        title: true,
-        replyCount: true,
-        createdAt: true,
-      },
-    });
 
     // Most prayed for requests
     const topPrayers = await this.prisma.prayerRequest.findMany({
@@ -156,14 +140,11 @@ export class AnalyticsService {
 
     return {
       totals: {
-        forumPosts,
-        forumReplies,
         prayerRequests,
         testimonies,
         groups,
       },
       topContent: {
-        forums: topForums,
         prayers: topPrayers.map(p => ({
           id: p.id,
           content: p.content.substring(0, 100),

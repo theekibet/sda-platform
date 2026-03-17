@@ -55,8 +55,6 @@ const ReportModal = ({
   // Get content type label
   const getContentTypeLabel = () => {
     switch (contentType) {
-      case 'forumPost': return 'post';
-      case 'forumReply': return 'reply';
       case 'prayerRequest': return 'prayer request';
       case 'testimony': return 'testimony';
       case 'groupDiscussion': return 'discussion';

@@ -49,8 +49,8 @@ const Footer = () => {
               <a href="#" style={styles.socialLink}>📧</a>
             </div>
             <p style={styles.contactInfo}>
-              ✉️ info@sdaconnect.org<br />
-              📞 +254 700 000 000
+              ✉️ allankibet1820@gmail.com<br />
+              📞 +254 781 024 762
             </p>
           </div>
         </div>

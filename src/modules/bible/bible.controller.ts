@@ -1,7 +1,7 @@
 // src/modules/bible/bible.controller.ts
 import { 
   Controller, Get, Post, Body, Query, Param, 
-  UseGuards, HttpCode, HttpStatus, Logger 
+  UseGuards, HttpCode, HttpStatus, Logger, ForbiddenException 
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard';
@@ -191,6 +191,142 @@ export class BibleController {
   }
 
   /**
+   * Get detailed submission with queue position
+   */
+  @Get('my-submissions/:id')
+  @UseGuards(JwtAuthGuard)
+  async getSubmissionDetails(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    const submission = await this.prisma.sharedVerse.findFirst({
+      where: {
+        id,
+        userId: user.id, // Ensure user owns this submission
+      },
+      include: {
+        verse: {
+          include: {
+            version: true,
+          },
+        },
+      },
+    });
+
+    if (!submission) {
+      return { success: false, message: 'Submission not found' };
+    }
+
+// Calculate queue position for pending submissions
+let queuePosition: number | null = null;
+if (submission.status === 'pending') {
+  queuePosition = await this.prisma.sharedVerse.count({
+    where: {
+      status: 'pending',
+      createdAt: {
+        lt: submission.createdAt,
+      },
+    },
+  }) + 1;
+}
+
+    return {
+      success: true,
+      data: {
+        ...submission,
+        queuePosition,
+      },
+    };
+  }
+
+  /**
+   * Cancel a pending submission (delete from database)
+   */
+  @Post('my-submissions/:id/cancel')
+  @UseGuards(JwtAuthGuard)
+  async cancelSubmission(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+  ) {
+    // Find the submission
+    const submission = await this.prisma.sharedVerse.findFirst({
+      where: {
+        id,
+        userId: user.id,
+      },
+    });
+
+    if (!submission) {
+      return { success: false, message: 'Submission not found' };
+    }
+
+    // Only allow cancellation of pending submissions
+    if (submission.status !== 'pending') {
+      throw new ForbiddenException('Only pending submissions can be cancelled');
+    }
+
+    // Delete the submission (as requested - no record kept)
+    await this.prisma.sharedVerse.delete({
+      where: { id },
+    });
+
+    return {
+      success: true,
+      message: 'Submission cancelled successfully',
+    };
+  }
+
+  /**
+   * Get queue statistics for user
+   */
+  @Get('my-submissions/queue/stats')
+  @UseGuards(JwtAuthGuard)
+  async getMyQueueStats(@CurrentUser() user: any) {
+    const totalPending = await this.prisma.sharedVerse.count({
+      where: {
+        status: 'pending',
+      },
+    });
+
+    const mySubmissions = await this.prisma.sharedVerse.findMany({
+      where: {
+        userId: user.id,
+        status: 'pending',
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    // Calculate positions for user's pending submissions
+    const submissionsWithPosition = await Promise.all(
+      mySubmissions.map(async (sub) => {
+        const position = await this.prisma.sharedVerse.count({
+          where: {
+            status: 'pending',
+            createdAt: {
+              lt: sub.createdAt,
+            },
+          },
+        }) + 1;
+        
+        return {
+          id: sub.id,
+          position,
+        };
+      })
+    );
+
+    return {
+      success: true,
+      data: {
+        totalPending,
+        yourSubmissions: submissionsWithPosition,
+      },
+    };
+  }
+
+  /**
    * Get the current queue status
    */
   @Get('queue')
@@ -217,7 +353,6 @@ export class BibleController {
 
   /**
    * Get today's verse (for landing page and dashboard)
-   * FIXED: Uses date range to handle timezone issues
    */
   @Get('today')
   async getTodaysVerse() {

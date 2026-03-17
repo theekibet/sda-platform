@@ -1,14 +1,11 @@
 // src/pages/members/groups/GroupChat.jsx
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
-import { 
-  getDiscussionWithReplies, 
-  createDiscussionReply,
-  markMessagesAsRead 
-} from '../../../services/api';
-import Avatar from '../../../components/common/Avatar';// ✅ ADD THIS
+import { groupsService } from '../../../services/groupsService';
+import Avatar from '../../../components/common/Avatar';
+import MessageReactions from '../../../components/groups/MessageReactions';
 
-function GroupChat({ discussionId, groupName, onBack }) {
+function GroupChat({ groupId, groupName, onBack }) {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -18,27 +15,39 @@ function GroupChat({ discussionId, groupName, onBack }) {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
   
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
   const pollIntervalRef = useRef(null);
 
   // Initial load
   useEffect(() => {
-    fetchMessages();
-    
-    // Set up polling for new messages (every 2 seconds for better real-time feel)
-    pollIntervalRef.current = setInterval(() => {
-      fetchNewMessages();
-    }, 2000);
+    if (groupId) {
+      fetchMessages();
+      
+      // Set up polling for new messages (every 3 seconds)
+      pollIntervalRef.current = setInterval(() => {
+        fetchNewMessages();
+      }, 3000);
+
+      // Mark as read when opening chat
+      markAsRead();
+    }
 
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
       }
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
     };
-  }, [discussionId]);
+  }, [groupId]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -46,31 +55,25 @@ function GroupChat({ discussionId, groupName, onBack }) {
   }, [messages]);
 
   const fetchMessages = async (reset = true) => {
+    if (!groupId) return;
+    
     try {
       if (reset) {
         setLoading(true);
         setPage(1);
       }
       
-      const response = await getDiscussionWithReplies(discussionId, reset ? 1 : page);
-      const newMessages = response.data.replies || [];
+      const response = await groupsService.getMessages(groupId, reset ? 1 : page, 50);
+      
+      // Handle response structure
+      const actualData = response.data?.data || response.data;
+      const newMessages = actualData.messages || [];
       
       if (reset) {
-        setMessages(newMessages);
-        setHasMore(newMessages.length === 20);
+        setMessages(newMessages.reverse()); // Show latest at bottom
+        setHasMore(actualData.totalPages > 1);
       } else {
         setMessages(prev => [...newMessages.reverse(), ...prev]);
-      }
-
-      // Mark messages as read
-      if (newMessages.length > 0) {
-        const unreadIds = newMessages
-          .filter(msg => msg.authorId !== user.id && !msg.read)
-          .map(msg => msg.id);
-        
-        if (unreadIds.length > 0) {
-          await markMessagesAsRead(discussionId, unreadIds);
-        }
       }
 
     } catch (error) {
@@ -81,31 +84,29 @@ function GroupChat({ discussionId, groupName, onBack }) {
     }
   };
 
-  // IMPROVED: Better polling logic that actually detects new messages
   const fetchNewMessages = async () => {
+    if (!groupId || messages.length === 0) return;
+    
     try {
-      // Fetch the latest messages (page 1)
-      const response = await getDiscussionWithReplies(discussionId, 1, 50);
-      const latestMessages = response.data.replies || [];
+      const response = await groupsService.getMessages(groupId, 1, 50);
+      const actualData = response.data?.data || response.data;
+      const latestMessages = actualData.messages || [];
       
       if (latestMessages.length === 0) return;
       
-      // If we have no messages yet, just set them
-      if (messages.length === 0) {
-        setMessages(latestMessages);
+      // Get the latest message ID we have
+      const latestExistingId = messages[messages.length - 1]?.id;
+      const latestExistingIndex = latestMessages.findIndex(m => m.id === latestExistingId);
+      
+      if (latestExistingIndex === -1) {
+        // We don't have any of these messages - probably first load or different chat
         return;
       }
       
-      // Get the IDs of messages we already have
-      const existingIds = new Set(messages.map(m => m.id));
-      
-      // Find messages that are new (not in our current messages)
-      const newMessages = latestMessages.filter(msg => !existingIds.has(msg.id));
+      // Find messages that are newer than our latest
+      const newMessages = latestMessages.slice(latestExistingIndex + 1);
       
       if (newMessages.length > 0) {
-        console.log(`Found ${newMessages.length} new messages:`, newMessages);
-        
-        // Add new messages to the end
         setMessages(prev => [...prev, ...newMessages]);
         
         // Mark new messages as read
@@ -114,7 +115,7 @@ function GroupChat({ discussionId, groupName, onBack }) {
           .map(msg => msg.id);
         
         if (unreadIds.length > 0) {
-          await markMessagesAsRead(discussionId, unreadIds);
+          await groupsService.markAsRead(groupId);
         }
       }
     } catch (error) {
@@ -123,17 +124,18 @@ function GroupChat({ discussionId, groupName, onBack }) {
   };
 
   const loadMoreMessages = async () => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMore || !hasMore || !groupId) return;
     
     setLoadingMore(true);
     const nextPage = page + 1;
     setPage(nextPage);
     
     try {
-      const response = await getDiscussionWithReplies(discussionId, nextPage);
-      const olderMessages = response.data.replies || [];
+      const response = await groupsService.getMessages(groupId, nextPage, 50);
+      const actualData = response.data?.data || response.data;
+      const olderMessages = actualData.messages || [];
       
-      if (olderMessages.length < 20) {
+      if (olderMessages.length < 50) {
         setHasMore(false);
       }
       
@@ -141,10 +143,10 @@ function GroupChat({ discussionId, groupName, onBack }) {
       
       // Maintain scroll position
       const container = messagesContainerRef.current;
-      if (container) {
-        const firstMessage = container.children[olderMessages.length];
-        if (firstMessage) {
-          firstMessage.scrollIntoView();
+      if (container && olderMessages.length > 0) {
+        const firstNewMessage = container.children[olderMessages.length];
+        if (firstNewMessage) {
+          firstNewMessage.scrollIntoView();
         }
       }
     } catch (error) {
@@ -156,7 +158,7 @@ function GroupChat({ discussionId, groupName, onBack }) {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || sending) return;
+    if ((!newMessage.trim() && !uploadingFile) || sending) return;
 
     const messageText = newMessage.trim();
     setNewMessage('');
@@ -166,27 +168,44 @@ function GroupChat({ discussionId, groupName, onBack }) {
     const tempMessage = {
       id: 'temp-' + Date.now(),
       content: messageText,
+      messageType: 'text',
       authorId: user.id,
-      author: { name: user.name, avatarUrl: user.avatarUrl },
+      author: { 
+        id: user.id,
+        name: user.name, 
+        avatarUrl: user.avatarUrl 
+      },
       createdAt: new Date().toISOString(),
+      isAnonymous: false,
       sending: true,
+      reactions: [],
+      _count: { reactions: 0 }
     };
 
     setMessages(prev => [...prev, tempMessage]);
     scrollToBottom();
 
     try {
-      const response = await createDiscussionReply({
+      const response = await groupsService.sendMessage(groupId, {
         content: messageText,
-        discussionId,
+        messageType: 'text',
+        isAnonymous: false,
+        replyToId: replyingTo?.id
       });
+
+      // Handle response
+      const actualData = response.data?.data || response.data;
 
       // Replace temp message with real one
       setMessages(prev => 
         prev.map(msg => 
-          msg.id === tempMessage.id ? { ...response.data, sending: false } : msg
+          msg.id === tempMessage.id ? { ...actualData, sending: false } : msg
         )
       );
+      
+      // Clear reply if any
+      setReplyingTo(null);
+      
     } catch (error) {
       // Remove temp message on error
       setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
@@ -196,16 +215,112 @@ function GroupChat({ discussionId, groupName, onBack }) {
     }
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setUploadingFile(true);
+    
+    // Create FormData for file upload
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      // Upload file first (you'll need an upload endpoint)
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      const uploadData = await uploadResponse.json();
+      const fileUrl = uploadData.url;
+      
+      // Send message with file
+      const response = await groupsService.sendMessage(groupId, {
+        content: file.name,
+        messageType: file.type.startsWith('image/') ? 'image' : 'file',
+        fileUrl: fileUrl,
+        fileName: file.name,
+        isAnonymous: false
+      });
+      
+      const actualData = response.data?.data || response.data;
+      setMessages(prev => [...prev, actualData]);
+      scrollToBottom();
+      
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setUploadingFile(false);
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleReaction = async (messageId, reaction) => {
+    try {
+      await groupsService.addReaction(messageId, reaction);
+      
+      // Optimistic update
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === messageId) {
+          const existingReaction = msg.reactions?.find(r => 
+            r.userId === user.id && r.reaction === reaction
+          );
+          
+          if (existingReaction) {
+            // Remove reaction
+            return {
+              ...msg,
+              reactions: msg.reactions?.filter(r => 
+                !(r.userId === user.id && r.reaction === reaction)
+              )
+            };
+          } else {
+            // Add reaction
+            const newReaction = {
+              id: 'temp-' + Date.now(),
+              userId: user.id,
+              user: { id: user.id, name: user.name },
+              reaction
+            };
+            return {
+              ...msg,
+              reactions: [...(msg.reactions || []), newReaction]
+            };
+          }
+        }
+        return msg;
+      }));
+      
+    } catch (error) {
+      console.error('Error adding reaction:', error);
+      // Refresh messages to get correct state
+      fetchMessages();
+    }
+  };
+
   const handleTyping = () => {
     // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // This is optional - can be implemented later
+    // This is optional - can be implemented with WebSockets later
     typingTimeoutRef.current = setTimeout(() => {
       // Send stopped typing
     }, 2000);
+  };
+
+  const markAsRead = async () => {
+    try {
+      await groupsService.markAsRead(groupId);
+    } catch (error) {
+      console.error('Error marking as read:', error);
+    }
   };
 
   const scrollToBottom = () => {
@@ -258,6 +373,14 @@ function GroupChat({ discussionId, groupName, onBack }) {
     return groups;
   };
 
+  if (!groupId) {
+    return (
+      <div style={styles.loadingContainer}>
+        <p>No group selected</p>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
@@ -284,6 +407,19 @@ function GroupChat({ discussionId, groupName, onBack }) {
             </span>
           )}
         </div>
+        
+        {/* Reply indicator */}
+        {replyingTo && (
+          <div style={styles.replyingTo}>
+            <span>Replying to {replyingTo.author?.name}</span>
+            <button 
+              onClick={() => setReplyingTo(null)}
+              style={styles.cancelReplyButton}
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Messages Area */}
@@ -298,8 +434,8 @@ function GroupChat({ discussionId, groupName, onBack }) {
           </div>
         )}
 
-        {messageGroups.map((group, groupIndex) => (
-          <div key={group.date}>
+        {messageGroups.map((group) => (
+          <div key={`date-${group.date}`}>
             {/* Date Separator */}
             <div style={styles.dateSeparator}>
               <span style={styles.dateText}>
@@ -319,49 +455,102 @@ function GroupChat({ discussionId, groupName, onBack }) {
                 group.messages[index - 1]?.authorId !== message.authorId;
 
               return (
-                <div
-                  key={message.id}
-                  style={{
-                    ...styles.messageRow,
-                    justifyContent: isMe ? 'flex-end' : 'flex-start',
-                  }}
-                >
-                  {!isMe && showAvatar && (
-                    <Avatar user={message.author} size="small" />
-                  )}
-                  
+                <div key={message.id}>
                   <div
                     style={{
-                      ...styles.messageWrapper,
-                      marginLeft: !isMe && !showAvatar ? '48px' : '8px',
+                      ...styles.messageRow,
+                      justifyContent: isMe ? 'flex-end' : 'flex-start',
                     }}
                   >
                     {!isMe && showAvatar && (
-                      <span style={styles.messageAuthor}>
-                        {message.author?.name}
-                      </span>
+                      <Avatar 
+                        user={message.author} 
+                        size="small" 
+                        style={styles.avatar}
+                      />
                     )}
                     
                     <div
                       style={{
-                        ...styles.messageBubble,
-                        backgroundColor: isMe ? '#667eea' : '#f0f0f0',
-                        color: isMe ? 'white' : '#333',
+                        ...styles.messageWrapper,
+                        marginLeft: !isMe && !showAvatar ? '48px' : '8px',
+                        maxWidth: message.messageType === 'image' ? '300px' : '70%',
                       }}
                     >
-                      <p style={styles.messageContent}>{message.content}</p>
-                      
-                      <div style={styles.messageFooter}>
-                        <span style={styles.messageTime}>
-                          {formatTime(message.createdAt)}
+                      {!isMe && showAvatar && (
+                        <span style={styles.messageAuthor}>
+                          {message.author?.name}
                         </span>
-                        {isMe && (
-                          <span style={styles.messageStatus}>
-                            {message.sending ? '⏳' : message.read ? '✓✓' : '✓'}
-                          </span>
+                      )}
+                      
+                      {/* Message content based on type */}
+                      <div
+                        style={{
+                          ...styles.messageBubble,
+                          backgroundColor: isMe ? '#667eea' : '#f0f0f0',
+                          color: isMe ? 'white' : '#333',
+                          padding: message.messageType === 'image' ? '4px' : '10px 14px',
+                        }}
+                      >
+                        {message.messageType === 'image' ? (
+                          <img 
+                            src={message.fileUrl} 
+                            alt={message.content}
+                            style={styles.messageImage}
+                            onClick={() => window.open(message.fileUrl, '_blank')}
+                          />
+                        ) : message.messageType === 'file' ? (
+                          <a 
+                            href={message.fileUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={styles.fileLink}
+                          >
+                            📎 {message.fileName || message.content}
+                          </a>
+                        ) : (
+                          <p style={styles.messageContent}>{message.content}</p>
                         )}
+                        
+                        {/* Edited indicator */}
+                        {message.isEdited && (
+                          <span style={styles.editedIndicator}>(edited)</span>
+                        )}
+                        
+                        <div style={styles.messageFooter}>
+                          <span style={styles.messageTime}>
+                            {formatTime(message.createdAt)}
+                          </span>
+                          {isMe && (
+                            <span style={styles.messageStatus}>
+                              {message.sending ? '⏳' : '✓✓'}
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Reactions */}
+                      <MessageReactions
+                        messageId={message.id}
+                        reactions={message.reactions || []}
+                        onReact={(reaction) => handleReaction(message.id, reaction)}
+                      />
                     </div>
+                  </div>
+
+                  {/* Reply button */}
+                  <div style={{
+                    ...styles.replyButtonContainer,
+                    justifyContent: isMe ? 'flex-end' : 'flex-start',
+                    marginLeft: !isMe ? '48px' : '0',
+                    marginRight: isMe ? '48px' : '0',
+                  }}>
+                    <button
+                      onClick={() => setReplyingTo(message)}
+                      style={styles.replyButton}
+                    >
+                      Reply
+                    </button>
                   </div>
                 </div>
               );
@@ -373,6 +562,32 @@ function GroupChat({ discussionId, groupName, onBack }) {
 
       {/* Input Area */}
       <form onSubmit={handleSendMessage} style={styles.inputArea}>
+        {/* File upload button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          style={styles.fileButton}
+          disabled={uploadingFile}
+        >
+          {uploadingFile ? '⏳' : '📎'}
+        </button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          accept="image/*,.pdf,.doc,.docx,.txt"
+        />
+
+        {/* Emoji button (optional) */}
+        <button
+          type="button"
+          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+          style={styles.emojiButton}
+        >
+          😊
+        </button>
+
         <textarea
           value={newMessage}
           onChange={(e) => {
@@ -385,22 +600,48 @@ function GroupChat({ discussionId, groupName, onBack }) {
               handleSendMessage(e);
             }
           }}
-          placeholder="Type a message..."
+          placeholder={replyingTo ? `Reply to ${replyingTo.author?.name}...` : "Type a message..."}
           style={styles.input}
           rows="1"
         />
         <button
           type="submit"
-          disabled={!newMessage.trim() || sending}
+          disabled={(!newMessage.trim() && !uploadingFile) || sending}
           style={{
             ...styles.sendButton,
-            opacity: !newMessage.trim() || sending ? 0.5 : 1,
-            cursor: !newMessage.trim() || sending ? 'not-allowed' : 'pointer',
+            opacity: (!newMessage.trim() && !uploadingFile) || sending ? 0.5 : 1,
+            cursor: (!newMessage.trim() && !uploadingFile) || sending ? 'not-allowed' : 'pointer',
           }}
         >
           Send
         </button>
       </form>
+
+      {/* Emoji picker placeholder - you can add a real emoji picker library here */}
+      {showEmojiPicker && (
+        <div style={styles.emojiPicker}>
+          <button onClick={() => {
+            setNewMessage(prev => prev + '😊');
+            setShowEmojiPicker(false);
+          }}>😊</button>
+          <button onClick={() => {
+            setNewMessage(prev => prev + '🙏');
+            setShowEmojiPicker(false);
+          }}>🙏</button>
+          <button onClick={() => {
+            setNewMessage(prev => prev + '❤️');
+            setShowEmojiPicker(false);
+          }}>❤️</button>
+          <button onClick={() => {
+            setNewMessage(prev => prev + '👍');
+            setShowEmojiPicker(false);
+          }}>👍</button>
+          <button onClick={() => {
+            setNewMessage(prev => prev + '🎉');
+            setShowEmojiPicker(false);
+          }}>🎉</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -414,6 +655,7 @@ const styles = {
     borderRadius: '12px',
     overflow: 'hidden',
     border: '1px solid #eaeaea',
+    position: 'relative',
   },
   loadingContainer: {
     display: 'flex',
@@ -438,6 +680,7 @@ const styles = {
     padding: '12px 16px',
     backgroundColor: 'white',
     borderBottom: '1px solid #eaeaea',
+    position: 'relative',
   },
   backButton: {
     background: 'none',
@@ -461,6 +704,28 @@ const styles = {
     fontSize: '12px',
     color: '#667eea',
     fontStyle: 'italic',
+  },
+  replyingTo: {
+    position: 'absolute',
+    bottom: '-30px',
+    left: '16px',
+    right: '16px',
+    backgroundColor: '#f0f4ff',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: '12px',
+    color: '#667eea',
+    zIndex: 10,
+  },
+  cancelReplyButton: {
+    background: 'none',
+    border: 'none',
+    color: '#667eea',
+    cursor: 'pointer',
+    fontSize: '14px',
   },
   messagesContainer: {
     flex: 1,
@@ -494,7 +759,13 @@ const styles = {
   },
   messageRow: {
     display: 'flex',
-    marginBottom: '4px',
+    marginBottom: '2px',
+  },
+  avatar: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '18px',
+    marginRight: '8px',
   },
   messageWrapper: {
     maxWidth: '70%',
@@ -508,10 +779,10 @@ const styles = {
     marginLeft: '4px',
   },
   messageBubble: {
-    padding: '10px 14px',
     borderRadius: '18px',
     borderBottomLeftRadius: '4px',
     wordWrap: 'break-word',
+    position: 'relative',
   },
   messageContent: {
     margin: '0 0 4px 0',
@@ -519,11 +790,34 @@ const styles = {
     lineHeight: '1.4',
     whiteSpace: 'pre-wrap',
   },
+  messageImage: {
+    maxWidth: '100%',
+    maxHeight: '200px',
+    borderRadius: '12px',
+    cursor: 'pointer',
+  },
+  fileLink: {
+    color: 'inherit',
+    textDecoration: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    '&:hover': {
+      textDecoration: 'underline',
+    },
+  },
+  editedIndicator: {
+    fontSize: '10px',
+    opacity: 0.7,
+    marginLeft: '4px',
+    fontStyle: 'italic',
+  },
   messageFooter: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: '4px',
+    marginTop: '2px',
   },
   messageTime: {
     fontSize: '10px',
@@ -533,12 +827,53 @@ const styles = {
     fontSize: '10px',
     opacity: 0.7,
   },
+  replyButtonContainer: {
+    display: 'flex',
+    marginTop: '2px',
+    marginBottom: '8px',
+  },
+  replyButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '11px',
+    color: '#999',
+    cursor: 'pointer',
+    padding: '2px 8px',
+    '&:hover': {
+      color: '#667eea',
+    },
+  },
   inputArea: {
     display: 'flex',
     padding: '12px',
     backgroundColor: 'white',
     borderTop: '1px solid #eaeaea',
     gap: '8px',
+    alignItems: 'flex-end',
+  },
+  fileButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '20px',
+    cursor: 'pointer',
+    padding: '8px',
+    color: '#667eea',
+    '&:hover': {
+      backgroundColor: '#f0f0f0',
+      borderRadius: '20px',
+    },
+  },
+  emojiButton: {
+    background: 'none',
+    border: 'none',
+    fontSize: '20px',
+    cursor: 'pointer',
+    padding: '8px',
+    color: '#667eea',
+    '&:hover': {
+      backgroundColor: '#f0f0f0',
+      borderRadius: '20px',
+    },
   },
   input: {
     flex: 1,
@@ -564,6 +899,19 @@ const styles = {
     fontWeight: '500',
     alignSelf: 'flex-end',
     transition: 'opacity 0.2s',
+  },
+  emojiPicker: {
+    position: 'absolute',
+    bottom: '80px',
+    right: '20px',
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '10px',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: '5px',
+    zIndex: 100,
   },
 };
 

@@ -1,6 +1,7 @@
 // src/App.jsx
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import Layout from './components/layout/Layout';
 import LandingPage from './pages/public/LandingPage';
 import Login from './components/members/Login';
@@ -8,10 +9,9 @@ import Register from './components/members/Register';
 import Dashboard from './pages/members/Dashboard';
 import AdminLogin from './pages/admin/AdminLogin';
 import AdminDashboard from './pages/admin/AdminDashboard';
-import Forum from './pages/members/Forum';
 import PrayerWall from './pages/members/PrayerWall';
 import Profile from './pages/members/Profile';
-import Location from './pages/members/Location';
+
 import GroupsList from './pages/members/groups/GroupsList';
 import GroupDetail from './pages/members/groups/GroupDetail';
 
@@ -35,6 +35,11 @@ import UserManagement from './pages/admin/UserManagement';
 import Analytics from './pages/admin/Analytics';
 import AdminVerseQueue from './pages/admin/Admin/Bible/AdminVerseQueue'; 
 
+import CommunityBoard from './pages/members/community/CommunityBoard';
+import LearningHub from './pages/members/learning/LearningHub';
+import Discover from './pages/members/Discover';
+import Bookmarks from './pages/members/Bookmarks';
+
 function App() {
   const { user, loading } = useAuth();
 
@@ -48,172 +53,199 @@ function App() {
   }
 
   return (
-    <Routes>
-      {/* Public Routes - NO Layout */}
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/admin/login" element={<AdminLogin />} />
+    <NotificationProvider>
+      <Routes>
+        {/* Public Routes - NO Layout */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
 
-      {/* Protected Member Routes - WITH Layout */}
-      <Route path="/dashboard" element={
-        <Layout>
-          <Dashboard />
-        </Layout>
-      } />
-      
-      <Route path="/forum" element={
-        <Layout>
-          <Forum />
-        </Layout>
-      } />
-      
-      <Route path="/prayer-wall" element={
-        <Layout>
-          <PrayerWall />
-        </Layout>
-      } />
-      
-      <Route path="/profile" element={
-        <Layout>
-          <Profile />
-        </Layout>
-      } />
-      
-      <Route path="/location" element={
-        <Layout>
-          <Location />
-        </Layout>
-      } />
-      
-      <Route path="/groups" element={
-        <Layout>
-          <GroupsList />
-        </Layout>
-      } />
-      
-      <Route path="/groups/:groupId" element={
-        <Layout>
-          <GroupDetail />
-        </Layout>
-      } />
+        {/* ===== BIBLE READER FULL-SCREEN ROUTES ===== */}
+        {/* These MUST be outside Layout for full-screen experience */}
+        <Route path="/bible/read/:book/:chapter?" element={
+          <BibleReader mode="fullscreen" />
+        } />
+        <Route path="/bible/read" element={
+          <Navigate to="/bible/read/Genesis/1" replace />
+        } />
 
-      {/* Bible Routes - Available to all logged-in users */}
-      <Route path="/bible/reader" element={
-        <Layout>
-          <BibleReader />
-        </Layout>
-      } />
+        {/* Protected Member Routes - WITH Layout */}
+        <Route path="/dashboard" element={
+          <Layout>
+            <Dashboard />
+          </Layout>
+        } />
+        
+        <Route path="/prayer-wall" element={
+          <Layout>
+            <PrayerWall />
+          </Layout>
+        } />
+        
+        <Route path="/profile" element={
+          <Layout>
+            <Profile />
+          </Layout>
+        } />
+        
+        
+        <Route path="/groups" element={
+          <Layout>
+            <GroupsList />
+          </Layout>
+        } />
+        
+        <Route path="/groups/:groupId" element={
+          <Layout>
+            <GroupDetail />
+          </Layout>
+        } />
 
-      <Route path="/bible/verse-of-day" element={
-        <Layout>
-          <VerseOfTheDay />
-        </Layout>
-      } />
+        {/* Bible Routes - WITH Layout (these are dashboard views) */}
+        <Route path="/bible/reader" element={
+          <Layout>
+            <div style={{ padding: '20px' }}>
+              <h2>📖 Bible Reader</h2>
+              <p>Click the button below to open the full-screen Bible reader</p>
+              <button 
+                onClick={() => window.location.href = '/bible/read'}
+                style={styles.bibleButton}
+              >
+                Open Full-Screen Bible Reader
+              </button>
+            </div>
+          </Layout>
+        } />
 
-      <Route path="/bible/search" element={
-        <Layout>
-          <VerseBrowser />
-        </Layout>
-      } />
+        <Route path="/bible/verse-of-day" element={
+          <Layout>
+            <VerseOfTheDay />
+          </Layout>
+        } />
 
-      <Route path="/bible/queue" element={
-        <Layout>
-          <VerseQueueStatus />
-        </Layout>
-      } />
-      
-      <Route path="/my-submissions" element={
-        <Layout>
-          <MySubmissions />
-        </Layout>
-      } />
+        <Route path="/bible/search" element={
+          <Layout>
+            <VerseBrowser />
+          </Layout>
+        } />
 
-      <Route path="/bible/bookmarks" element={
-        <Layout>
-          <div style={styles.comingSoon}>
-            <h2>🔖 My Bookmarks</h2>
-            <p>Bookmarks feature coming soon!</p>
-          </div>
-        </Layout>
-      } />
+        <Route path="/bible/queue" element={
+          <Layout>
+            <VerseQueueStatus />
+          </Layout>
+        } />
+        
+        <Route path="/my-submissions" element={
+          <Layout>
+            <MySubmissions />
+          </Layout>
+        } />
 
-      {/* Admin Routes - All with Layout and admin protection */}
-      <Route path="/admin/dashboard" element={
-        <Layout>
-          <AdminDashboard />
-        </Layout>
-      } />
+        <Route path="/bible/bookmarks" element={
+          <Layout>
+            <Bookmarks />
+          </Layout>
+        } />
 
-      <Route path="/admin/users" element={
-        <Layout>
-          <UserManagement />
-        </Layout>
-      } />
+        {/* Discover Route */}
+        <Route path="/discover" element={
+          <Layout>
+            <Discover />
+          </Layout>
+        } />
 
-      <Route path="/admin/moderation" element={
-        <Layout>
-          <ModerationQueue />
-        </Layout>
-      } />
+        {/* Community Board */}
+        <Route path="/community" element={
+          <Layout>
+            <CommunityBoard />
+          </Layout>
+        } />
 
-      <Route path="/admin/bible/queue" element={  // ✅ ADD THIS ROUTE
-        <Layout>
-          <AdminVerseQueue />
-        </Layout>
-      } />
+        {/* Learning Hub */}
+        <Route path="/learning" element={
+          <Layout>
+            <LearningHub />
+          </Layout>
+        } />
 
-      <Route path="/admin/announcements" element={
-        <Layout>
-          <AnnouncementList />
-        </Layout>
-      } />
+        {/* Admin Routes - All with Layout and admin protection */}
+        <Route path="/admin/dashboard" element={
+          <Layout>
+            <AdminDashboard />
+          </Layout>
+        } />
 
-      <Route path="/admin/analytics" element={
-        <Layout>
-          <Analytics />
-        </Layout>
-      } />
+        <Route path="/admin/users" element={
+          <Layout>
+            <UserManagement />
+          </Layout>
+        } />
 
-      <Route path="/admin/settings" element={
-        <Layout>
-          <SettingsPanel />
-        </Layout>
-      } />
+        <Route path="/admin/moderation" element={
+          <Layout>
+            <ModerationQueue />
+          </Layout>
+        } />
 
-      <Route path="/admin/security/ip" element={
-        <Layout>
-          <IPBlocking />
-        </Layout>
-      } />
+        <Route path="/admin/bible/queue" element={
+          <Layout>
+            <AdminVerseQueue />
+          </Layout>
+        } />
 
-      <Route path="/admin/security/sessions" element={
-        <Layout>
-          <Sessions />
-        </Layout>
-      } />
+        <Route path="/admin/announcements" element={
+          <Layout>
+            <AnnouncementList />
+          </Layout>
+        } />
 
-      <Route path="/admin/security/attempts" element={
-        <Layout>
-          <LoginAttempts />
-        </Layout>
-      } />
+        <Route path="/admin/analytics" element={
+          <Layout>
+            <Analytics />
+          </Layout>
+        } />
 
-      <Route path="/admin/backups" element={
-        <Layout>
-          <BackupManager />
-        </Layout>
-      } />
+        <Route path="/admin/settings" element={
+          <Layout>
+            <SettingsPanel />
+          </Layout>
+        } />
 
-      <Route path="/admin/health" element={
-        <Layout>
-          <SystemHealth />
-        </Layout>
-      } />
+        <Route path="/admin/security/ip" element={
+          <Layout>
+            <IPBlocking />
+          </Layout>
+        } />
 
-      {/* Catch all - redirect to home */}
-      <Route path="*" element={<Navigate to="/" />} />
-    </Routes>
+        <Route path="/admin/security/sessions" element={
+          <Layout>
+            <Sessions />
+          </Layout>
+        } />
+
+        <Route path="/admin/security/attempts" element={
+          <Layout>
+            <LoginAttempts />
+          </Layout>
+        } />
+        
+        <Route path="/admin/backups" element={
+          <Layout>
+            <BackupManager />
+          </Layout>
+        } />
+
+        <Route path="/admin/health" element={
+          <Layout>
+            <SystemHealth />
+          </Layout>
+        } />
+
+        {/* Catch all - redirect to home */}
+        <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
+    </NotificationProvider>
   );
 }
 
@@ -247,6 +279,16 @@ const styles = {
     borderRadius: '8px',
     color: '#666',
   },
+  bibleButton: {
+    padding: '12px 24px',
+    backgroundColor: '#667eea',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '16px',
+    cursor: 'pointer',
+    marginTop: '20px'
+  }
 };
 
 // Add keyframe animation

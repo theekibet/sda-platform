@@ -3,13 +3,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { BibleApiService, BibleVerseResponse, BibleSearchResult } from './bible-api.service';
 import { BibleVerse } from '@prisma/client';
+import { BIBLE_VERSES_COUNTS } from './bible-verse-counts'; // IMPORT THE NEW FILE
 
 @Injectable()
 export class BibleVerseService {
   private readonly logger = new Logger(BibleVerseService.name);
 
-  // Chapter length mapping for all Bible books
-  private readonly chapterLengths: { [key: string]: number } = {
+  // Keep only chapter counts (number of chapters per book) - this is different from verse counts
+  private readonly chapterCounts: { [key: string]: number } = {
     'Genesis': 50, 'Exodus': 40, 'Leviticus': 27, 'Numbers': 36, 'Deuteronomy': 34,
     'Joshua': 24, 'Judges': 21, 'Ruth': 4, '1 Samuel': 31, '2 Samuel': 24,
     '1 Kings': 22, '2 Kings': 25, '1 Chronicles': 29, '2 Chronicles': 36,
@@ -192,9 +193,37 @@ export class BibleVerseService {
   }
 
   /**
+   * Get the expected number of verses for a specific chapter
+   * NOW USING THE COMPLETE BIBLE_VERSES_COUNTS
+   */
+  private getExpectedVerseCount(book: string, chapter: number): number {
+    // Get the array of verse counts for this book
+    const bookCounts = BIBLE_VERSES_COUNTS[book];
+    
+    if (!bookCounts) {
+      this.logger.warn(`No verse count data for book: ${book}, using fallback 150`);
+      return 150; // Fallback
+    }
+    
+    // Arrays are 0-indexed, chapters are 1-indexed
+    const index = chapter - 1;
+    
+    if (index >= bookCounts.length) {
+      this.logger.warn(`Chapter ${chapter} exceeds known chapters for ${book} (max: ${bookCounts.length})`);
+      return 150;
+    }
+    
+    const expectedCount = bookCounts[index];
+    this.logger.debug(`Expected verses for ${book} ${chapter}: ${expectedCount}`);
+    
+    return expectedCount;
+  }
+
+  /**
    * Get a chapter, fetching ALL verses from API if not in database
    */
   async getChapter(book: string, chapter: number, translation: string = 'kjv') {
+    this.logger.log(`========== GET CHAPTER START ==========`);
     this.logger.log(`Getting chapter ${book} ${chapter} (${translation})`);
     
     // First, try to get from database
@@ -216,53 +245,153 @@ export class BibleVerseService {
 
     this.logger.log(`Found ${verses.length} verses in database`);
 
-    // Get expected chapter length for this book
-    const expectedLength = this.chapterLengths[book] || 150;
-    this.logger.log(`Expected length for ${book} ${chapter}: ${expectedLength} verses`);
+    // Get expected verse count for this specific chapter
+    const expectedLength = this.getExpectedVerseCount(book, chapter);
+    this.logger.log(`Expected verses for ${book} ${chapter}: ${expectedLength}`);
 
-    // Check if we have a complete chapter
-    if (verses.length > 0) {
-      const lastVerseInDb = Math.max(...verses.map(v => v.verse));
-      const firstVerseInDb = Math.min(...verses.map(v => v.verse));
-      
-      this.logger.log(`Verses in DB: ${firstVerseInDb} to ${lastVerseInDb}`);
-      
-      // If we have the first and last verse of the chapter, assume complete
-      if (firstVerseInDb === 1 && lastVerseInDb === expectedLength) {
-        this.logger.log(`Found complete chapter (verses 1-${lastVerseInDb}), returning ${verses.length} cached verses`);
-        return verses;
-      }
-      
-      // If we don't have the complete chapter, fetch the rest
-      this.logger.log(`Chapter incomplete: have verses ${firstVerseInDb}-${lastVerseInDb}, expected up to ${expectedLength}. Fetching from API...`);
-    } else {
-      this.logger.log(`No verses found in database for ${book} ${chapter}`);
+    // If we have all verses, return them
+    if (verses.length === expectedLength) {
+      this.logger.log(`✅ Found complete chapter in database`);
+      this.logger.log(`========== GET CHAPTER END ==========`);
+      return verses;
     }
 
-    // If we don't have the complete chapter, fetch the WHOLE chapter from API
-    this.logger.log(`Fetching entire chapter ${book} ${chapter} from API...`);
+    this.logger.log(`⚠️ Database incomplete. Fetching from API using Parameterized API...`);
+
+    // Fetch complete chapter using Parameterized API
+    try {
+      const bookId = this.bibleApi.getBookId(book);
+      this.logger.log(`Book ID: ${bookId}`);
+      
+      const apiVerses = await this.bibleApi.getCompleteChapter(translation, bookId, chapter);
+      
+      this.logger.log(`API returned ${apiVerses.length} verses`);
+      
+      if (apiVerses.length > 0) {
+        // Log verse range
+        const verseNumbers = apiVerses.map(v => v.verse).sort((a, b) => a - b);
+        this.logger.log(`Verse numbers from API: ${verseNumbers[0]} to ${verseNumbers[verseNumbers.length-1]}`);
+        this.logger.log(`Total verses from API: ${verseNumbers.length}`);
+      }
+      
+      // Get or create version
+      const version = await this.getOrCreateVersion(translation);
+      
+      // Save ALL verses to database
+      let savedCount = 0;
+      let updatedCount = 0;
+      
+      for (const v of apiVerses) {
+        // Check if verse already exists
+        const existing = await this.prisma.bibleVerse.findFirst({
+          where: {
+            book: { equals: v.book },
+            chapter: v.chapter,
+            verse: v.verse,
+            versionId: version.id,
+          },
+        });
+        
+        if (!existing) {
+          await this.prisma.bibleVerse.create({
+            data: {
+              bibleId: `${bookId}_${chapter}_${v.verse}`,
+              versionId: version.id,
+              reference: v.reference,
+              book: v.book,
+              chapter: v.chapter,
+              verse: v.verse,
+              text: v.text,
+              isRange: false,
+            },
+          });
+          savedCount++;
+        } else {
+          // Optionally update existing verse text if it changed
+          if (existing.text !== v.text) {
+            await this.prisma.bibleVerse.update({
+              where: { id: existing.id },
+              data: { text: v.text }
+            });
+            updatedCount++;
+          }
+        }
+      }
+      
+      this.logger.log(`Saved ${savedCount} new verses, updated ${updatedCount} existing verses`);
+      
+      // Get ALL verses from database after save
+      verses = await this.prisma.bibleVerse.findMany({
+        where: {
+          book: { equals: book },
+          chapter,
+          version: {
+            code: translation,
+          },
+        },
+        orderBy: {
+          verse: 'asc',
+        },
+        include: {
+          version: true,
+        },
+      });
+      
+      this.logger.log(`After fetch, found ${verses.length}/${expectedLength} verses in database`);
+      
+      // Final verification
+      if (verses.length === expectedLength) {
+        this.logger.log(`✅ Successfully fetched complete chapter`);
+      } else {
+        this.logger.warn(`⚠️ Chapter still incomplete: have ${verses.length}, expected ${expectedLength}`);
+        
+        // Log missing verses
+        const presentVerses = new Set(verses.map(v => v.verse));
+        const missingVerses: number[] = []; // Add type annotation
+        for (let i = 1; i <= expectedLength; i++) {
+          if (!presentVerses.has(i)) {
+            missingVerses.push(i);
+          }
+        }
+        if (missingVerses.length > 0) {
+          this.logger.warn(`Missing verses: ${missingVerses.join(', ')}`);
+        }
+      }
+      
+      this.logger.log(`========== GET CHAPTER END ==========`);
+      return verses;
+      
+    } catch (error) {
+      this.logger.error(`Parameterized API failed: ${error.message}`);
+      this.logger.log(`Falling back to range fetch method...`);
+      
+      // Fall back to range fetch method
+      return this.getChapterRangeFallback(book, chapter, translation, expectedLength);
+    }
+  }
+
+  /**
+   * Fallback method using range fetch
+   */
+  private async getChapterRangeFallback(book: string, chapter: number, translation: string = 'kjv', expectedLength?: number) {
+    this.logger.log(`Using fallback range fetch for ${book} ${chapter}`);
+    
+    const expected = expectedLength || this.getExpectedVerseCount(book, chapter);
     
     try {
-      // Try to get the chapter range - use the exact chapter length
-      const rangeReference = `${book} ${chapter}:1-${expectedLength}`;
+      // Try to get the chapter range
+      const rangeReference = `${book} ${chapter}:1-${expected}`;
       this.logger.log(`Fetching range: ${rangeReference}`);
       
       const passageData = await this.bibleApi.getPassage(rangeReference, translation);
       
       if (passageData.verses && passageData.verses.length > 0) {
-        this.logger.log(`API returned ${passageData.verses.length} verses`);
+        this.logger.log(`Range API returned ${passageData.verses.length} verses`);
         
-        // Log the verse numbers to verify we got all of them
-        const verseNumbers = passageData.verses.map(v => v.verse).sort((a, b) => a - b);
-        this.logger.log(`Verse numbers from API: ${verseNumbers.join(', ')}`);
-        
-        // Get or create version
         const version = await this.getOrCreateVersion(translation);
         
-        // Save ALL verses to database
-        let savedCount = 0;
+        // Save verses
         for (const v of passageData.verses) {
-          // Check if verse already exists
           const existing = await this.prisma.bibleVerse.findFirst({
             where: {
               book: { equals: v.book },
@@ -285,120 +414,39 @@ export class BibleVerseService {
                 isRange: false,
               },
             });
-            savedCount++;
           }
         }
         
-        this.logger.log(`Saved ${savedCount} new verses to database`);
-        
-        // Now get ALL verses from database
-        verses = await this.prisma.bibleVerse.findMany({
+        // Get all verses
+        const verses = await this.prisma.bibleVerse.findMany({
           where: {
             book: { equals: book },
             chapter,
-            version: {
-              code: translation,
-            },
+            version: { code: translation },
           },
-          orderBy: {
-            verse: 'asc',
-          },
-          include: {
-            version: true,
-          },
+          orderBy: { verse: 'asc' },
+          include: { version: true },
         });
         
-        this.logger.log(`After fetch, found ${verses.length} verses total`);
+        this.logger.log(`Fallback complete: found ${verses.length} verses`);
         return verses;
       }
     } catch (error) {
-      this.logger.error(`Failed to fetch chapter range: ${error.message}`);
+      this.logger.error(`Fallback range fetch failed: ${error.message}`);
     }
     
-    // If range fetch fails, fetch verses individually up to the expected chapter length
-    this.logger.log(`Trying fallback: fetching all verses individually up to ${expectedLength}`);
-    
-    const version = await this.getOrCreateVersion(translation);
-    let lastFoundVerse = 0;
-    let consecutiveFailures = 0;
-    const maxConsecutiveFailures = 5;
-    
-    // Add a delay between requests to avoid rate limiting
-    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-    
-    // Try up to expectedLength verses
-    for (let i = 1; i <= expectedLength; i++) {
-      try {
-        // Add delay to avoid rate limiting
-        await delay(500); // Wait 500ms between requests
-        
-        // Check if we already have this verse
-        const existing = await this.prisma.bibleVerse.findFirst({
-          where: {
-            book: { equals: book },
-            chapter,
-            verse: i,
-            versionId: version.id,
-          },
-        });
-        
-        if (!existing) {
-          this.logger.log(`Fetching verse ${book} ${chapter}:${i}`);
-          // Fetch this specific verse
-          const verseData = await this.bibleApi.getVerse(`${book} ${chapter}:${i}`, translation);
-          
-          await this.prisma.bibleVerse.create({
-            data: {
-              bibleId: `${book}_${chapter}_${i}`,
-              versionId: version.id,
-              reference: `${book} ${chapter}:${i}`,
-              book,
-              chapter,
-              verse: i,
-              text: verseData.text,
-              isRange: false,
-            },
-          });
-          lastFoundVerse = i;
-          consecutiveFailures = 0;
-          this.logger.debug(`Successfully fetched verse ${i}`);
-        } else {
-          lastFoundVerse = i;
-          consecutiveFailures = 0;
-          this.logger.debug(`Verse ${i} already exists in database`);
-        }
-      } catch (e) {
-        consecutiveFailures++;
-        this.logger.warn(`Failed to fetch verse ${i} (failure ${consecutiveFailures}/${maxConsecutiveFailures}): ${e.message}`);
-        
-        // If we've had too many consecutive failures, assume end of chapter
-        if (consecutiveFailures >= maxConsecutiveFailures) {
-          this.logger.log(`Stopped after ${consecutiveFailures} consecutive failures at verse ${i}`);
-          break;
-        }
-      }
-    }
-    
-    this.logger.log(`Fetched up to verse ${lastFoundVerse}`);
-    
-    // Get all verses we have
-    verses = await this.prisma.bibleVerse.findMany({
+    // Ultimate fallback - return whatever we have
+    const verses = await this.prisma.bibleVerse.findMany({
       where: {
         book: { equals: book },
         chapter,
-        version: {
-          code: translation,
-        },
+        version: { code: translation },
       },
-      orderBy: {
-        verse: 'asc',
-      },
-      include: {
-        version: true,
-      },
+      orderBy: { verse: 'asc' },
+      include: { version: true },
     });
-
-    this.logger.log(`Returning ${verses.length} verses for ${book} ${chapter}`);
+    
+    this.logger.log(`Returning ${verses.length} verses from database (may be incomplete)`);
     return verses;
   }
 
@@ -460,5 +508,41 @@ export class BibleVerseService {
     });
     
     return pendingCount + 1;
+  }
+
+  /**
+   * Verify a chapter has all verses
+   */
+  async verifyChapterCompleteness(book: string, chapter: number, translation: string = 'kjv'): Promise<{
+    isComplete: boolean;
+    expected: number;
+    actual: number;
+    missingVerses: number[];
+  }> {
+    const verses = await this.prisma.bibleVerse.findMany({
+      where: {
+        book: { equals: book },
+        chapter,
+        version: { code: translation },
+      },
+      orderBy: { verse: 'asc' },
+    });
+    
+    const expected = this.getExpectedVerseCount(book, chapter);
+    const presentVerses = new Set(verses.map(v => v.verse));
+    
+    const missingVerses: number[] = []; // Add type annotation
+    for (let i = 1; i <= expected; i++) {
+      if (!presentVerses.has(i)) {
+        missingVerses.push(i);
+      }
+    }
+    
+    return {
+      isComplete: missingVerses.length === 0,
+      expected,
+      actual: verses.length,
+      missingVerses,
+    };
   }
 }

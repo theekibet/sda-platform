@@ -16,16 +16,16 @@ export class MaintenanceService {
     // Get all data from database
     const [
       members,
-      forumPosts,
-      forumReplies,
+      
+      
       prayerRequests,
       testimonies,
       groups,
       reports,
     ] = await Promise.all([
       this.prisma.member.findMany(),
-      this.prisma.forumPost.findMany(),
-      this.prisma.forumReply.findMany(),
+      
+      
       this.prisma.prayerRequest.findMany(),
       this.prisma.testimony.findMany(),
       this.prisma.group.findMany(),
@@ -37,8 +37,8 @@ export class MaintenanceService {
       type,
       data: {
         members,
-        forumPosts,
-        forumReplies,
+        
+        
         prayerRequests,
         testimonies,
         groups,
@@ -211,8 +211,8 @@ export class MaintenanceService {
   async getDatabaseStats() {
     const tableCounts = await Promise.all([
       this.prisma.member.count().then(c => ({ table: 'members', count: c })),
-      this.prisma.forumPost.count().then(c => ({ table: 'forum_posts', count: c })),
-      this.prisma.forumReply.count().then(c => ({ table: 'forum_replies', count: c })),
+      
+      
       this.prisma.prayerRequest.count().then(c => ({ table: 'prayer_requests', count: c })),
       this.prisma.testimony.count().then(c => ({ table: 'testimonies', count: c })),
       this.prisma.group.count().then(c => ({ table: 'groups', count: c })),

@@ -8,6 +8,7 @@ export const useBible = () => {
   const [todaysVerse, setTodaysVerse] = useState(null);
   const [queueStatus, setQueueStatus] = useState(null);
   const [mySubmissions, setMySubmissions] = useState([]);
+  const [queueStats, setQueueStats] = useState(null);
 
   // Fetch today's verse
   const fetchTodaysVerse = useCallback(async () => {
@@ -76,15 +77,73 @@ export const useBible = () => {
     }
   }, []);
 
+  // ============ NEW METHODS FOR ENHANCED SUBMISSIONS ============
+
+  // Get single submission details
+  const getSubmissionDetails = useCallback(async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await bibleService.getSubmissionDetails(id);
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.message || 'Failed to fetch submission details';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Cancel submission (delete)
+  const cancelSubmission = useCallback(async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await bibleService.cancelSubmission(id);
+      // Remove from local state
+      setMySubmissions(prev => prev.filter(sub => sub.id !== id));
+      return { success: true, data: response.data };
+    } catch (err) {
+      const message = err.response?.data?.message || 'Failed to cancel submission';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Get queue stats
+  const getMyQueueStats = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await bibleService.getMyQueueStats();
+      setQueueStats(response.data.data);
+      return response.data;
+    } catch (err) {
+      const message = err.response?.data?.message || 'Failed to fetch queue stats';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   return {
     loading,
     error,
     todaysVerse,
     queueStatus,
     mySubmissions,
+    queueStats,
     fetchTodaysVerse,
     fetchQueueStatus,
     shareVerse,
     fetchMySubmissions,
+    // New methods
+    getSubmissionDetails,
+    cancelSubmission,
+    getMyQueueStats,
   };
 };

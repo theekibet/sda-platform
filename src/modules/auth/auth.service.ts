@@ -58,10 +58,12 @@ export class AuthService {
         password: hashedPassword,
         age: age,
         gender,
-        // city field removed
         isActive: true,
       },
     });
+
+    // Auto-join General Discussion group
+    await this.autoJoinGeneralGroup(user.id);
   
     // Generate JWT token
     const token = this.generateToken(user);
@@ -140,5 +142,67 @@ export class AuthService {
     }
 
     return null;
+  }
+
+  private async autoJoinGeneralGroup(userId: string) {
+    try {
+      // Find or create General Discussion group
+      let generalGroup = await this.prisma.group.findFirst({
+        where: { name: 'General Discussion' }
+      });
+
+      if (!generalGroup) {
+        // Find an admin to be the creator
+        const admin = await this.prisma.member.findFirst({
+          where: { isAdmin: true }
+        });
+
+        generalGroup = await this.prisma.group.create({
+          data: {
+            name: 'General Discussion',
+            description: 'Open conversations about faith, life, and everything. This is our community hub!',
+            category: 'GENERAL',
+            isPrivate: false,
+            requireApproval: false,
+            isDefault: true,
+            allowAnonymous: true,
+            createdById: admin?.id || userId, // Use admin if exists, otherwise the new user
+          },
+        });
+        console.log('✅ Created General Discussion group');
+      }
+
+      // Check if already a member
+      const existingMember = await this.prisma.groupMember.findUnique({
+        where: {
+          groupId_memberId: {
+            groupId: generalGroup.id,
+            memberId: userId,
+          },
+        },
+      });
+
+      if (!existingMember) {
+        // Add user to group
+        await this.prisma.groupMember.create({
+          data: {
+            groupId: generalGroup.id,
+            memberId: userId,
+            role: 'member',
+            status: 'approved',
+          },
+        });
+
+        // Update member count
+        await this.prisma.group.update({
+          where: { id: generalGroup.id },
+          data: { memberCount: { increment: 1 } },
+        });
+
+        console.log(`✅ User ${userId} auto-joined General Discussion group`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to auto-join General Discussion group:', error);
+    }
   }
 }

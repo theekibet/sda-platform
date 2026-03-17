@@ -58,15 +58,9 @@ export const removeProfilePicture = () => API.delete('/members/profile/picture')
 
 // ============ LOCATION ENDPOINTS ============
 export const updateLocation = (data) => API.post('/location/update', data);
-export const findNearbyUsers = (city) => API.get(`/location/nearby?city=${city}`);
-export const getLocationStats = (city) => API.get(`/location/stats?city=${city}`);
-
-// ============ FORUM ENDPOINTS ============
-export const getForumPosts = () => API.get('/forum/posts');
-export const getForumPost = (postId) => API.get(`/forum/posts/${postId}`);
-export const createForumPost = (data) => API.post('/forum/posts', data);
-export const createForumReply = (data) => API.post('/forum/replies', data);
-export const markReplyHelpful = (replyId) => API.patch(`/forum/replies/${replyId}/helpful`);
+export const updateLocationConsent = (data) => API.post('/location/consent', data);
+export const getLocationStats = () => API.get('/location/stats');
+export const getPrivacyOptions = () => API.get('/location/privacy-options');
 
 // ============ PRAYER ENDPOINTS ============
 export const getPrayerRequests = (city, page = 1) => {
@@ -86,11 +80,15 @@ export const createTestimony = (data) => API.post('/prayer/testimonies', data);
 export const encourageTestimony = (id) => API.post(`/prayer/testimonies/${id}/encourage`);
 
 // ============ GROUPS ENDPOINTS ============
+// Note: For group operations, use groupsService.js which contains all the new message endpoints
+// These basic group endpoints are kept for backward compatibility
 export const getGroups = (params = {}) => {
   const queryParams = new URLSearchParams();
   if (params.category) queryParams.append('category', params.category);
   if (params.location) queryParams.append('location', params.location);
   if (params.search) queryParams.append('search', params.search);
+  if (params.meetingType) queryParams.append('meetingType', params.meetingType);
+  if (params.sort) queryParams.append('sort', params.sort);
   if (params.page) queryParams.append('page', params.page);
   if (params.limit) queryParams.append('limit', params.limit);
   return API.get(`/groups?${queryParams.toString()}`);
@@ -105,32 +103,13 @@ export const joinGroup = (groupId, message = '') => API.post(`/groups/${groupId}
 export const leaveGroup = (groupId) => API.post(`/groups/${groupId}/leave`);
 export const approveMember = (groupId, memberId) => API.post(`/groups/${groupId}/approve/${memberId}`);
 export const rejectMember = (groupId, memberId) => API.post(`/groups/${groupId}/reject/${memberId}`);
-export const getGroupDiscussions = (groupId, page = 1) => 
-  API.get(`/groups/${groupId}/discussions?page=${page}`);
-export const createDiscussion = (data) => API.post('/groups/discussions', data);
-
-// ============ GROUP CHAT ENDPOINTS ============
-export const getDiscussionWithReplies = (discussionId, page = 1, limit = 20, after = null) => {
-  const params = new URLSearchParams();
-  params.append('page', page);
-  params.append('limit', limit);
-  if (after) params.append('after', after);
-  return API.get(`/groups/discussions/${discussionId}?${params.toString()}`);
-};
-
-export const createDiscussionReply = (data) => API.post('/groups/discussions/reply', data);
-export const markMessagesAsRead = (discussionId, messageIds) => 
-  API.post(`/groups/discussions/${discussionId}/read`, { messageIds });
-export const startTyping = (discussionId) => 
-  API.post(`/groups/discussions/${discussionId}/typing/start`);
-export const stopTyping = (discussionId) => 
-  API.post(`/groups/discussions/${discussionId}/typing/stop`);
 
 // ============ REPORTS ENDPOINTS ============
 export const createReport = (data) => API.post('/reports', data);
 export const getMyReports = (params = {}) => {
   const queryParams = new URLSearchParams();
   if (params.status) queryParams.append('status', params.status);
+  if (params.contentType) queryParams.append('contentType', params.contentType);
   if (params.page) queryParams.append('page', params.page);
   if (params.limit) queryParams.append('limit', params.limit);
   return API.get(`/reports/my-reports?${queryParams.toString()}`);
@@ -170,6 +149,7 @@ export const getReports = (params = {}) => {
   const queryParams = new URLSearchParams();
   if (params.status) queryParams.append('status', params.status);
   if (params.priority) queryParams.append('priority', params.priority);
+  if (params.contentType) queryParams.append('contentType', params.contentType);
   if (params.page) queryParams.append('page', params.page);
   if (params.limit) queryParams.append('limit', params.limit);
   return API.get(`/admin/reports?${queryParams.toString()}`);
@@ -189,7 +169,7 @@ export const getContentModerationQueue = (params = {}) => {
   // Match the parameter names EXACTLY as in your DTO
   if (params.type) queryParams.append('type', params.type);
   if (params.status) queryParams.append('status', params.status);
-  if (params.severity) queryParams.append('severity', params.severity); // Changed from 'priority' to 'severity'
+  if (params.severity) queryParams.append('severity', params.severity);
   if (params.page) queryParams.append('page', params.page);
   if (params.limit) queryParams.append('limit', params.limit);
   if (params.search) queryParams.append('search', params.search);

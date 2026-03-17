@@ -1,15 +1,23 @@
 // src/pages/members/groups/GroupsList.jsx
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
-import { getGroups, joinGroup, getMyGroups } from '../../../services/api';
+import { groupsService } from '../../../services/groupsService';
 import { GROUP_CATEGORIES, getCategoryIcon, getCategoryLabel } from '../../../utils/groupCategories';
 import CreateGroup from './CreateGroup';
-import PropTypes from 'prop-types';
+import { useNavigate } from 'react-router-dom';
+import './Group.css';
 
-function GroupsList({ onViewGroup }) {
+function GroupsList({ onViewGroup = null }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [groups, setGroups] = useState([]);
   const [myGroups, setMyGroups] = useState([]);
+  const [discoverSections, setDiscoverSections] = useState({
+    forYou: [],
+    popularInYourCountry: [],
+    trending: [],
+    newGroups: [],
+  });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('discover');
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -17,32 +25,46 @@ function GroupsList({ onViewGroup }) {
     category: '',
     search: '',
     location: '',
+    meetingType: '',
+    sort: 'popular',
   });
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [lastRefresh, setLastRefresh] = useState(Date.now());
 
   useEffect(() => {
-    fetchGroups();
     fetchMyGroups();
-  }, []);
+    if (activeTab === 'discover') {
+      fetchDiscoverGroups();
+    }
+  }, [user]);
 
   useEffect(() => {
     if (activeTab === 'discover') {
       fetchGroups();
-    } else if (activeTab === 'my-groups') {
-      fetchMyGroups();
     }
   }, [filters, activeTab]);
+
+  // Refresh my groups periodically to update unread counts
+  useEffect(() => {
+    if (activeTab === 'my-groups') {
+      const interval = setInterval(() => {
+        fetchMyGroups();
+      }, 30000); // Every 30 seconds
+
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   const fetchGroups = async () => {
     setLoading(true);
     try {
-      const params = {};
-      if (filters.category) params.category = filters.category;
-      if (filters.search) params.search = filters.search;
-      if (filters.location) params.location = filters.location;
+      const params = {
+        ...filters,
+      };
       
-      const response = await getGroups(params);
-      setGroups(response.data.groups || []);
+      const response = await groupsService.getGroups(params);
+      const groupsData = response.data?.data || response.data || [];
+      setGroups(groupsData);
     } catch (error) {
       console.error('Error fetching groups:', error);
     } finally {
@@ -51,46 +73,97 @@ function GroupsList({ onViewGroup }) {
   };
 
   const fetchMyGroups = async () => {
-    setLoading(true);
     try {
-      const response = await getMyGroups();
-      setMyGroups(response.data.groups || []);
+      const response = await groupsService.getMyGroups();
+      const groupsData = response.data?.data || response.data || [];
+      setMyGroups(groupsData);
     } catch (error) {
       console.error('Error fetching my groups:', error);
-    } finally {
-      setLoading(false);
+    }
+  };
+
+  const fetchDiscoverGroups = async () => {
+    try {
+      const response = await groupsService.getDiscoverGroups();
+      const data = response.data?.data || response.data || {
+        forYou: [],
+        popularInYourCountry: [],
+        trending: [],
+        newGroups: [],
+      };
+      setDiscoverSections(data);
+    } catch (error) {
+      console.error('Error fetching discover groups:', error);
     }
   };
 
   const handleJoinGroup = async (groupId) => {
+    if (!groupId) {
+      console.error('Cannot join group: No group ID provided');
+      return;
+    }
+    
     try {
-      await joinGroup(groupId);
+      await groupsService.joinGroup(groupId);
       alert('Request sent! The group admin will review your request.');
       fetchGroups();
       fetchMyGroups();
+      fetchDiscoverGroups();
     } catch (error) {
-      alert('Error joining group');
+      alert(error.response?.data?.message || 'Error joining group');
     }
   };
 
   const handleViewGroup = (groupId) => {
-    if (onViewGroup) {
-      onViewGroup(groupId); // Call the parent function
-    } else {
-      window.location.href = `/groups/${groupId}`; // Fallback navigation
+    if (!groupId) {
+      console.error('Cannot view group: Group ID is undefined');
+      return;
     }
+    
+    setTimeout(() => {
+      if (onViewGroup) {
+        onViewGroup(groupId);
+      } else {
+        navigate(`/groups/${groupId}`);
+      }
+    }, 0);
   };
+
+  // Separate General Discussion from other groups
+  const generalGroup = myGroups.find(g => g.name === 'General Discussion' || g.isDefault);
+  const otherMyGroups = myGroups.filter(g => !(g.name === 'General Discussion' || g.isDefault));
 
   const categories = GROUP_CATEGORIES;
 
+  const formatLastMessageTime = (timestamp) => {
+    if (!timestamp) return '';
+    
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMinutes = Math.floor((now - date) / (1000 * 60));
+    
+    if (diffMinutes < 1) return 'Just now';
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    if (diffMinutes < 1440) {
+      const hours = Math.floor(diffMinutes / 60);
+      return `${hours}h ago`;
+    }
+    if (diffMinutes < 2880) return 'Yesterday';
+    return date.toLocaleDateString();
+  };
+
+  if (loading && activeTab === 'discover' && groups.length === 0) {
+    return <div className="groups-loading">Loading groups...</div>;
+  }
+
   return (
-    <div style={styles.container}>
+    <div className="groups-container">
       {/* Header */}
-      <div style={styles.header}>
-        <h2 style={styles.title}>🤝 Fellowship Circles</h2>
+      <div className="groups-header">
+        <h2 className="groups-title">🤝 Fellowship Circles</h2>
         <button
           onClick={() => setShowCreateForm(true)}
-          style={styles.createButton}
+          className="groups-create-button"
         >
           + Create Group
         </button>
@@ -104,39 +177,42 @@ function GroupsList({ onViewGroup }) {
             setShowCreateForm(false);
             fetchGroups();
             fetchMyGroups();
+            fetchDiscoverGroups();
           }}
         />
       )}
 
       {/* Tabs */}
-      <div style={styles.tabs}>
+      <div className="groups-tabs">
         <button
           onClick={() => setActiveTab('discover')}
-          style={{
-            ...styles.tab,
-            ...(activeTab === 'discover' ? styles.activeTab : {}),
-          }}
+          className={`groups-tab ${activeTab === 'discover' ? 'groups-tab-active' : ''}`}
         >
           🔍 Discover Groups
         </button>
         <button
-          onClick={() => setActiveTab('my-groups')}
-          style={{
-            ...styles.tab,
-            ...(activeTab === 'my-groups' ? styles.activeTab : {}),
+          onClick={() => {
+            setActiveTab('my-groups');
+            fetchMyGroups();
           }}
+          className={`groups-tab ${activeTab === 'my-groups' ? 'groups-tab-active' : ''}`}
         >
           👥 My Groups
+          {myGroups.reduce((total, group) => total + (group.unreadCount || 0), 0) > 0 && (
+            <span style={styles.totalUnreadBadge}>
+              {myGroups.reduce((total, group) => total + (group.unreadCount || 0), 0)}
+            </span>
+          )}
         </button>
       </div>
 
       {/* Filters - Only show on Discover tab */}
       {activeTab === 'discover' && (
-        <div style={styles.filters}>
+        <div className="groups-filters">
           <select
             value={filters.category}
             onChange={(e) => setFilters({...filters, category: e.target.value})}
-            style={styles.filterSelect}
+            className="groups-filter-select"
           >
             <option value="">All Categories</option>
             {categories.map(cat => (
@@ -146,36 +222,54 @@ function GroupsList({ onViewGroup }) {
             ))}
           </select>
 
+          <select
+            value={filters.meetingType}
+            onChange={(e) => setFilters({...filters, meetingType: e.target.value})}
+            className="groups-filter-select"
+          >
+            <option value="">All Meeting Types</option>
+            <option value="online">💻 Online Only</option>
+            <option value="in-person">🤝 In-Person Only</option>
+            <option value="hybrid">🔄 Hybrid</option>
+          </select>
+
+          <select
+            value={filters.sort}
+            onChange={(e) => setFilters({...filters, sort: e.target.value})}
+            className="groups-filter-select"
+          >
+            <option value="popular">⭐ Most Popular</option>
+            <option value="new">🆕 Newest</option>
+            <option value="active">🔥 Most Active</option>
+          </select>
+
           <input
             type="text"
             placeholder="Search groups..."
             value={filters.search}
             onChange={(e) => setFilters({...filters, search: e.target.value})}
-            style={styles.filterInput}
+            className="groups-filter-input"
           />
 
           <input
             type="text"
-            placeholder="Location (e.g., Nairobi)"
+            placeholder="Location (optional)"
             value={filters.location}
             onChange={(e) => setFilters({...filters, location: e.target.value})}
-            style={styles.filterInput}
+            className="groups-filter-input"
           />
         </div>
       )}
 
       {/* Category Quick Filters */}
       {activeTab === 'discover' && (
-        <div style={styles.categoryQuickFilters}>
+        <div className="groups-category-quick-filters">
           <button
             onClick={() => {
               setSelectedCategory('');
               setFilters({...filters, category: ''});
             }}
-            style={{
-              ...styles.categoryChip,
-              ...(!selectedCategory ? styles.categoryChipActive : {}),
-            }}
+            className={`groups-category-chip ${!selectedCategory ? 'groups-category-chip-active' : ''}`}
           >
             All
           </button>
@@ -186,10 +280,7 @@ function GroupsList({ onViewGroup }) {
                 setSelectedCategory(cat.value);
                 setFilters({...filters, category: cat.value});
               }}
-              style={{
-                ...styles.categoryChip,
-                ...(selectedCategory === cat.value ? styles.categoryChipActive : {}),
-              }}
+              className={`groups-category-chip ${selectedCategory === cat.value ? 'groups-category-chip-active' : ''}`}
             >
               {cat.icon} {cat.label.split(' ')[0]}
             </button>
@@ -198,291 +289,399 @@ function GroupsList({ onViewGroup }) {
       )}
 
       {/* Groups Grid */}
-      {loading ? (
-        <div style={styles.loading}>Loading groups...</div>
-      ) : (
-        <div style={styles.groupsGrid}>
-          {(activeTab === 'discover' ? groups : myGroups).length === 0 ? (
-            <div style={styles.emptyState}>
-              <p style={styles.emptyText}>
-                {activeTab === 'discover' 
-                  ? 'No groups found. Be the first to create one!' 
-                  : 'You haven\'t joined any groups yet.'}
-              </p>
-            </div>
-          ) : (
-            (activeTab === 'discover' ? groups : myGroups).map(group => (
-              <div key={group.id} style={styles.groupCard}>
-                <div style={styles.groupHeader}>
-                  <span style={styles.groupCategory}>
-                    {getCategoryIcon(group.category)} {getCategoryLabel(group.category)}
-                  </span>
-                  {group.isPrivate && (
-                    <span style={styles.privateBadge}>🔒 Private</span>
-                  )}
-                </div>
-                
-                <h3 style={styles.groupName}>{group.name}</h3>
-                <p style={styles.groupDescription}>
-                  {group.description.length > 100
-                    ? group.description.substring(0, 100) + '...'
-                    : group.description}
-                </p>
-                
-                <div style={styles.groupMeta}>
-                  <span style={styles.groupMetaItem}>
-                    👥 {group.memberCount} members
-                  </span>
-                  {group.location && (
-                    <span style={styles.groupMetaItem}>
-                      📍 {group.location}
-                    </span>
-                  )}
-                  <span style={styles.groupMetaItem}>
-                    💬 {group.discussionCount || 0} discussions
-                  </span>
-                </div>
+      <div className="groups-grid">
+        {activeTab === 'my-groups' ? (
+          <>
+            {/* General Discussion (always first) */}
+            {generalGroup && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">📢 Community Hub</h3>
+                <GroupCard
+                  group={generalGroup}
+                  isMember={true}
+                  onView={() => handleViewGroup(generalGroup.id)}
+                  showLastMessage={true}
+                />
+              </div>
+            )}
 
-                <div style={styles.groupFooter}>
-                  <span style={styles.groupCreator}>
-                    Created by {group.createdBy?.name}
-                  </span>
-                  
-                  {activeTab === 'discover' ? (
-                    group.userMembership ? (
-                      group.userMembership.status === 'pending' ? (
-                        <span style={styles.pendingBadge}>⏳ Pending Approval</span>
-                      ) : (
-                        <button
-                          onClick={() => handleViewGroup(group.id)}
-                          style={styles.viewButton}
-                        >
-                          View Group
-                        </button>
-                      )
-                    ) : (
-                      <button
-                        onClick={() => handleJoinGroup(group.id)}
-                        style={styles.joinButton}
-                      >
-                        Join Group
-                      </button>
-                    )
-                  ) : (
-                    <button
-                      onClick={() => handleViewGroup(group.id)}
-                      style={styles.viewButton}
-                    >
-                      View Group
-                    </button>
-                  )}
+            {/* Other Groups */}
+            {otherMyGroups.length > 0 && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">👥 Your Groups</h3>
+                <div className="groups-sub-grid">
+                  {otherMyGroups.map(group => (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      isMember={true}
+                      onView={() => handleViewGroup(group.id)}
+                      showLastMessage={true}
+                    />
+                  ))}
                 </div>
               </div>
-            ))
-          )}
-        </div>
-      )}
+            )}
+
+            {!generalGroup && otherMyGroups.length === 0 && (
+              <div className="groups-empty-state">
+                <p className="groups-empty-text">You haven't joined any groups yet.</p>
+                <button
+                  onClick={() => setActiveTab('discover')}
+                  className="groups-create-button"
+                  style={{ marginTop: '15px' }}
+                >
+                  🔍 Discover Groups
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          /* Discover Tab - Smart Recommendations */
+          <>
+            {/* FOR YOU Section */}
+            {discoverSections.forYou && discoverSections.forYou.length > 0 && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">✨ For You</h3>
+                <p style={styles.sectionSubtitle}>
+                  Based on your interests
+                </p>
+                <div className="groups-sub-grid">
+                  {discoverSections.forYou.map(group => (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      isMember={false}
+                      onJoin={() => handleJoinGroup(group.id)}
+                      onView={() => handleViewGroup(group.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* POPULAR IN YOUR COUNTRY Section */}
+            {discoverSections.popularInYourCountry && discoverSections.popularInYourCountry.length > 0 && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">🇰🇪 Popular in Kenya</h3>
+                <p style={styles.sectionSubtitle}>
+                  Groups other Kenyans love
+                </p>
+                <div className="groups-sub-grid">
+                  {discoverSections.popularInYourCountry.map(group => (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      isMember={false}
+                      onJoin={() => handleJoinGroup(group.id)}
+                      onView={() => handleViewGroup(group.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TRENDING Section */}
+            {discoverSections.trending && discoverSections.trending.length > 0 && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">🔥 Trending Now</h3>
+                <p style={styles.sectionSubtitle}>
+                  Most active groups this week
+                </p>
+                <div className="groups-sub-grid">
+                  {discoverSections.trending.map(group => (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      isMember={false}
+                      onJoin={() => handleJoinGroup(group.id)}
+                      onView={() => handleViewGroup(group.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* NEW GROUPS Section */}
+            {discoverSections.newGroups && discoverSections.newGroups.length > 0 && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">🆕 New Groups</h3>
+                <p style={styles.sectionSubtitle}>
+                  Recently created, still growing
+                </p>
+                <div className="groups-sub-grid">
+                  {discoverSections.newGroups.map(group => (
+                    <GroupCard
+                      key={group.id}
+                      group={group}
+                      isMember={false}
+                      onJoin={() => handleJoinGroup(group.id)}
+                      onView={() => handleViewGroup(group.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* All Groups (filtered) */}
+            {(filters.search || filters.category || filters.location || filters.meetingType) && (
+              <div className="groups-special-section">
+                <h3 className="groups-special-title">🔍 Search Results</h3>
+                {groups.length === 0 ? (
+                  <div className="groups-empty-state">
+                    <p className="groups-empty-text">No groups found matching your filters.</p>
+                  </div>
+                ) : (
+                  <div className="groups-sub-grid">
+                    {groups.map(group => (
+                      <GroupCard
+                        key={group.id}
+                        group={group}
+                        isMember={false}
+                        onJoin={() => handleJoinGroup(group.id)}
+                        onView={() => handleViewGroup(group.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Empty state when no recommendations */}
+            {!discoverSections.forYou?.length && 
+             !discoverSections.popularInYourCountry?.length && 
+             !discoverSections.trending?.length && 
+             !discoverSections.newGroups?.length &&
+             !filters.search && !filters.category && !filters.location && !filters.meetingType && (
+              <div className="groups-empty-state">
+                <p className="groups-empty-text">No groups available yet. Be the first to create one!</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-// Make prop optional with PropTypes
-GroupsList.propTypes = {
-  onViewGroup: PropTypes.func  // Removed .isRequired to make it optional
+// Enhanced GroupCard component
+const GroupCard = ({ group, isMember, onJoin, onView, showLastMessage = false }) => {
+  // Ensure group has an id before rendering
+  if (!group || !group.id) {
+    console.error('GroupCard: Invalid group object', group);
+    return null;
+  }
+
+  const userMembership = group.userMembership;
+  const hasUnread = group.unreadCount > 0;
+
+  const handleViewClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onView && group.id) {
+      onView();
+    }
+  };
+
+  const handleJoinClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onJoin && group.id) {
+      onJoin();
+    }
+  };
+
+  const getMeetingTypeBadge = () => {
+    if (!group.meetingType) return null;
+    
+    const badges = {
+      online: '💻 Online',
+      'in-person': '🤝 In-Person',
+      hybrid: '🔄 Hybrid',
+    };
+    
+    return badges[group.meetingType] || null;
+  };
+
+  const formatLastMessageTime = (timestamp) => {
+    if (!timestamp) return '';
+    
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMinutes = Math.floor((now - date) / (1000 * 60));
+    
+    if (diffMinutes < 1) return 'Just now';
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    if (diffMinutes < 1440) {
+      const hours = Math.floor(diffMinutes / 60);
+      return `${hours}h ago`;
+    }
+    if (diffMinutes < 2880) return 'Yesterday';
+    return date.toLocaleDateString();
+  };
+
+  return (
+    <div 
+      className="group-card"
+      style={{
+        ...(hasUnread ? styles.groupCardUnread : {}),
+        cursor: 'pointer',
+      }}
+      onClick={handleViewClick}
+    >
+      <div className="group-card-header">
+        <span className="group-card-category">
+          {getCategoryIcon(group.category)} {getCategoryLabel(group.category)}
+        </span>
+        {group.isPrivate && (
+          <span className="group-card-private-badge">🔒 Private</span>
+        )}
+      </div>
+      
+      <h3 className="group-card-name">
+        {group.name}
+        {hasUnread && (
+          <span style={styles.unreadBadge}>
+            {group.unreadCount > 99 ? '99+' : group.unreadCount}
+          </span>
+        )}
+      </h3>
+      
+      <p className="group-card-description">
+        {group.description?.length > 100
+          ? group.description.substring(0, 100) + '...'
+          : group.description}
+      </p>
+      
+      {/* Last message preview for my groups */}
+      {showLastMessage && group.lastMessage && (
+        <div style={styles.lastMessagePreview}>
+          <span style={styles.lastMessageAuthor}>
+            {group.lastMessage.author?.name}:
+          </span>
+          <span style={styles.lastMessageContent}>
+            {group.lastMessage.content?.length > 30
+              ? group.lastMessage.content.substring(0, 30) + '...'
+              : group.lastMessage.content}
+          </span>
+          <span style={styles.lastMessageTime}>
+            {formatLastMessageTime(group.lastMessage.createdAt)}
+          </span>
+        </div>
+      )}
+      
+      <div className="group-card-meta">
+        <span className="group-card-meta-item">
+          👥 {group.memberCount || 0} members
+        </span>
+        {getMeetingTypeBadge() && (
+          <span className="group-card-meta-item">
+            {getMeetingTypeBadge()}
+          </span>
+        )}
+        {group.location && group.meetingType !== 'online' && (
+          <span className="group-card-meta-item">
+            📍 {group.location}
+          </span>
+        )}
+        <span className="group-card-meta-item">
+          💬 {group.messageCount || group.discussionCount || 0} messages
+        </span>
+        {group.lastMessageAt && (
+          <span className="group-card-meta-item">
+            🕐 Last message {formatLastMessageTime(group.lastMessageAt)}
+          </span>
+        )}
+      </div>
+
+      <div className="group-card-footer">
+        <span className="group-card-creator">
+          Created by {group.createdBy?.name}
+        </span>
+        
+        {isMember ? (
+          <button
+            onClick={handleViewClick}
+            className="group-card-view-button"
+          >
+            View Group
+          </button>
+        ) : (
+          userMembership ? (
+            userMembership.status === 'pending' ? (
+              <span className="group-card-pending-badge">⏳ Pending</span>
+            ) : (
+              <button onClick={handleViewClick} className="group-card-view-button">
+                View Group
+              </button>
+            )
+          ) : (
+            <button 
+              onClick={handleJoinClick} 
+              className="group-card-join-button"
+            >
+              Join Group
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
 };
 
-// Add default prop
-GroupsList.defaultProps = {
-  onViewGroup: null
-};
-
+// Additional styles
 const styles = {
-  container: {
-    maxWidth: '1200px',
-    margin: '0 auto',
-    padding: '20px',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '30px',
-  },
-  title: {
-    margin: 0,
-    color: '#333',
-    fontSize: '28px',
-  },
-  createButton: {
-    padding: '10px 20px',
-    backgroundColor: '#667eea',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
+  sectionSubtitle: {
     fontSize: '14px',
-    cursor: 'pointer',
-  },
-  tabs: {
-    display: 'flex',
-    gap: '10px',
-    marginBottom: '20px',
-  },
-  tab: {
-    padding: '8px 16px',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    backgroundColor: '#f0f0f0',
     color: '#666',
+    marginBottom: '15px',
   },
-  activeTab: {
-    backgroundColor: '#667eea',
+  groupCardUnread: {
+    border: '2px solid #667eea',
+    backgroundColor: '#f0f4ff',
+  },
+  unreadBadge: {
+    display: 'inline-block',
+    marginLeft: '8px',
+    backgroundColor: '#ff4444',
     color: 'white',
+    borderRadius: '12px',
+    padding: '2px 8px',
+    fontSize: '11px',
+    fontWeight: '600',
   },
-  filters: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '10px',
-    marginBottom: '20px',
+  totalUnreadBadge: {
+    display: 'inline-block',
+    marginLeft: '8px',
+    backgroundColor: '#ff4444',
+    color: 'white',
+    borderRadius: '12px',
+    padding: '2px 8px',
+    fontSize: '11px',
+    fontWeight: '600',
   },
-  filterSelect: {
-    padding: '8px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-  },
-  filterInput: {
-    padding: '8px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-  },
-  categoryQuickFilters: {
+  lastMessagePreview: {
+    backgroundColor: '#f5f5f5',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    marginBottom: '12px',
+    fontSize: '12px',
     display: 'flex',
-    gap: '8px',
-    marginBottom: '20px',
+    gap: '6px',
     flexWrap: 'wrap',
   },
-  categoryChip: {
-    padding: '6px 12px',
-    borderRadius: '20px',
-    border: '1px solid #ddd',
-    backgroundColor: 'white',
-    cursor: 'pointer',
-    fontSize: '13px',
-  },
-  categoryChipActive: {
-    backgroundColor: '#667eea',
-    color: 'white',
-    borderColor: '#667eea',
-  },
-  loading: {
-    textAlign: 'center',
-    padding: '50px',
-    color: '#666',
-  },
-  groupsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))',
-    gap: '20px',
-  },
-  emptyState: {
-    gridColumn: '1 / -1',
-    textAlign: 'center',
-    padding: '60px',
-    backgroundColor: '#f9f9f9',
-    borderRadius: '10px',
-  },
-  emptyText: {
-    color: '#999',
-    fontSize: '16px',
-  },
-  groupCard: {
-    backgroundColor: 'white',
-    borderRadius: '10px',
-    padding: '20px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  groupHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '10px',
-  },
-  groupCategory: {
-    fontSize: '12px',
+  lastMessageAuthor: {
+    fontWeight: '600',
     color: '#667eea',
-    backgroundColor: '#f0f4ff',
-    padding: '4px 8px',
-    borderRadius: '4px',
   },
-  privateBadge: {
-    fontSize: '11px',
-    color: '#f59e0b',
-    backgroundColor: '#fff3e0',
-    padding: '2px 6px',
-    borderRadius: '3px',
-  },
-  groupName: {
-    margin: '0 0 10px 0',
-    color: '#333',
-    fontSize: '18px',
-  },
-  groupDescription: {
+  lastMessageContent: {
     color: '#666',
-    fontSize: '14px',
-    lineHeight: '1.5',
-    marginBottom: '15px',
     flex: 1,
   },
-  groupMeta: {
-    display: 'flex',
-    gap: '12px',
-    marginBottom: '15px',
-    fontSize: '12px',
+  lastMessageTime: {
     color: '#999',
-    flexWrap: 'wrap',
-  },
-  groupMetaItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  groupFooter: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTop: '1px solid #eee',
-    paddingTop: '15px',
-  },
-  groupCreator: {
-    fontSize: '12px',
-    color: '#999',
-  },
-  joinButton: {
-    padding: '6px 12px',
-    backgroundColor: '#28a745',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '12px',
-  },
-  viewButton: {
-    padding: '6px 12px',
-    backgroundColor: '#667eea',
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '12px',
-  },
-  pendingBadge: {
-    padding: '6px 12px',
-    backgroundColor: '#ffc107',
-    color: '#333',
-    borderRadius: '4px',
-    fontSize: '12px',
+    fontSize: '10px',
+    alignSelf: 'center',
   },
 };
 

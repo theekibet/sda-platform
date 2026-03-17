@@ -9,6 +9,7 @@ import {
   deleteUser,
 } from '../../services/api';
 import Avatar from '../../components/common/Avatar';
+import './UserManagement.css'; // Import the CSS file
 
 function UserManagement() {
   const [users, setUsers] = useState([]);
@@ -22,6 +23,8 @@ function UserManagement() {
   const [showUserModal, setShowUserModal] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [selectAll, setSelectAll] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -31,7 +34,14 @@ function UserManagement() {
     try {
       setLoading(true);
       const response = await getUsers({ page: 1, limit: 100 });
-      setUsers(response.data.users || []);
+      
+      // Process users to ensure avatar URLs are properly formatted
+      const processedUsers = (response.data.users || []).map(user => ({
+        ...user,
+        avatarUrl: user.avatarUrl || null
+      }));
+      
+      setUsers(processedUsers);
     } catch (error) {
       console.error('Error fetching users:', error);
       if (error.response) {
@@ -87,6 +97,50 @@ function UserManagement() {
     }
   };
 
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedUsers([]);
+    } else {
+      setSelectedUsers(filteredUsers.map(u => u.id));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  const handleSelectUser = (userId) => {
+    if (selectedUsers.includes(userId)) {
+      setSelectedUsers(selectedUsers.filter(id => id !== userId));
+      setSelectAll(false);
+    } else {
+      setSelectedUsers([...selectedUsers, userId]);
+    }
+  };
+
+  const handleBulkAction = async (action) => {
+    if (selectedUsers.length === 0) {
+      alert('No users selected');
+      return;
+    }
+
+    if (action === 'delete') {
+      if (window.confirm(`⚠️ Delete ${selectedUsers.length} users? This cannot be undone.`)) {
+        // Implement bulk delete
+        alert('Bulk delete not yet implemented');
+      }
+    } else if (action === 'suspend') {
+      setConfirmAction({
+        type: 'bulk_suspend',
+        onConfirm: (reason, duration) => {
+          // Implement bulk suspend
+          alert(`Would suspend ${selectedUsers.length} users`);
+          setShowConfirmDialog(false);
+          setSelectedUsers([]);
+          setSelectAll(false);
+        }
+      });
+      setShowConfirmDialog(true);
+    }
+  };
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = 
       user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -113,108 +167,195 @@ function UserManagement() {
   });
 
   if (loading) {
-    return <div style={styles.loading}>Loading users...</div>;
+    return (
+      <div className="user-management-loading-container">
+        <div className="user-management-loading-spinner"></div>
+        <div className="user-management-loading-text">Loading users...</div>
+      </div>
+    );
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <h2 style={styles.title}>👥 User Management</h2>
-        <div style={styles.userFilters}>
-          <input
-            type="text"
-            placeholder="Search users..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={styles.searchInput}
-          />
+    <div className="user-management-container">
+      {/* Header Section */}
+      <div className="user-management-header">
+        <div className="user-management-header-left">
+          <h1 className="user-management-title">
+            <span className="user-management-title-icon">👥</span>
+            User Management
+          </h1>
+          <p className="user-management-subtitle">
+            Manage users, roles, and permissions
+          </p>
+        </div>
+        
+        {/* Stats Cards */}
+        <div className="user-management-stats-container">
+          <div className="user-management-stat-card">
+            <span className="user-management-stat-value">{users.length}</span>
+            <span className="user-management-stat-label">Total Users</span>
+          </div>
+          <div className="user-management-stat-card">
+            <span className="user-management-stat-value">{users.filter(u => u.isAdmin).length}</span>
+            <span className="user-management-stat-label">Admins</span>
+          </div>
+          <div className="user-management-stat-card">
+            <span className="user-management-stat-value">{users.filter(u => u.isSuspended).length}</span>
+            <span className="user-management-stat-label">Suspended</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters and Actions Bar */}
+      <div className="user-management-filters-bar">
+        <div className="user-management-search-section">
+          <div className="user-management-search-wrapper">
+            <span className="user-management-search-icon">🔍</span>
+            <input
+              type="text"
+              placeholder="Search by name, email, or phone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="user-management-search-input"
+            />
+          </div>
+          
           <select
             value={filters.role}
             onChange={(e) => setFilters({...filters, role: e.target.value})}
-            style={styles.filterSelect}
+            className="user-management-filter-select"
           >
             <option value="">All Roles</option>
             <option value="admin">Admin</option>
             <option value="moderator">Moderator</option>
             <option value="user">User</option>
           </select>
+
           <select
             value={filters.status}
             onChange={(e) => setFilters({...filters, status: e.target.value})}
-            style={styles.filterSelect}
+            className="user-management-filter-select"
           >
             <option value="">All Status</option>
             <option value="active">Active</option>
             <option value="suspended">Suspended</option>
           </select>
         </div>
+
+        {selectedUsers.length > 0 && (
+          <div className="user-management-bulk-actions">
+            <span className="user-management-selected-count">{selectedUsers.length} selected</span>
+            <button 
+              onClick={() => handleBulkAction('suspend')}
+              className="user-management-bulk-suspend-button"
+            >
+              ⛔ Suspend Selected
+            </button>
+            <button 
+              onClick={() => handleBulkAction('delete')}
+              className="user-management-bulk-delete-button"
+            >
+              🗑️ Delete Selected
+            </button>
+          </div>
+        )}
       </div>
 
-      <div style={styles.userTable}>
-        <table style={styles.table}>
-          <thead>
+      {/* Users Table */}
+      <div className="user-management-table-container">
+        <table className="user-management-table">
+          <thead className="user-management-table-head">
             <tr>
+              <th className="user-management-checkbox-cell">
+                <input
+                  type="checkbox"
+                  checked={selectAll}
+                  onChange={handleSelectAll}
+                  className="user-management-checkbox"
+                />
+              </th>
               <th>User</th>
               <th>Contact</th>
               <th>Role</th>
               <th>Status</th>
               <th>Joined</th>
+              <th>Last Active</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredUsers.map(user => (
-              <tr key={user.id}>
+              <tr key={user.id} className="user-management-table-row">
+                <td className="user-management-checkbox-cell">
+                  <input
+                    type="checkbox"
+                    checked={selectedUsers.includes(user.id)}
+                    onChange={() => handleSelectUser(user.id)}
+                    className="user-management-checkbox"
+                  />
+                </td>
                 <td>
-                  <div style={styles.userCell}>
+                  <div className="user-management-user-cell">
                     <Avatar user={user} size="small" />
-                    <div>
-                      <div style={styles.userName}>{user.name}</div>
-                      <div style={styles.userEmail}>{user.email}</div>
+                    <div className="user-management-user-info">
+                      <div className="user-management-user-name">{user.name}</div>
+                      <div className="user-management-user-email">{user.email}</div>
                     </div>
                   </div>
                 </td>
-                <td>{user.phone || '—'}</td>
                 <td>
-                  <span style={{
-                    ...styles.roleBadge,
-                    ...(user.isAdmin ? styles.adminRole : {}),
-                    ...(user.isModerator ? styles.moderatorRole : {})
-                  }}>
+                  <div className="user-management-contact-info">
+                    <div>{user.phone || '—'}</div>
+                    {user.city && <div className="user-management-user-location">📍 {user.city}</div>}
+                  </div>
+                </td>
+                <td>
+                  <span className={`user-management-role-badge ${user.isAdmin ? 'user-management-admin-role' : ''} ${user.isModerator ? 'user-management-moderator-role' : ''}`}>
                     {user.isAdmin ? 'Admin' : user.isModerator ? 'Moderator' : 'User'}
                   </span>
                 </td>
                 <td>
-                  <span style={{
-                    ...styles.statusBadge,
-                    ...(user.isSuspended ? styles.suspendedStatus : styles.activeStatus)
-                  }}>
+                  <span className={`user-management-status-badge ${user.isSuspended ? 'user-management-suspended-status' : 'user-management-active-status'}`}>
                     {user.isSuspended ? 'Suspended' : 'Active'}
                   </span>
+                  {user.suspendedUntil && (
+                    <div className="user-management-suspended-until">
+                      until {new Date(user.suspendedUntil).toLocaleDateString()}
+                    </div>
+                  )}
                 </td>
-                <td>{new Date(user.createdAt).toLocaleDateString()}</td>
                 <td>
-                  <div style={styles.actionButtons}>
+                  <div className="user-management-date-cell">
+                    {new Date(user.createdAt).toLocaleDateString()}
+                  </div>
+                </td>
+                <td>
+                  <div className="user-management-date-cell">
+                    {user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleDateString() : 'Never'}
+                  </div>
+                </td>
+                <td>
+                  <div className="user-management-action-buttons">
                     <button
                       onClick={() => {
                         setSelectedUser(user);
                         setShowUserModal(true);
                       }}
-                      style={styles.viewButton}
+                      className="user-management-action-button"
                       title="View Details"
                     >
                       👁️
                     </button>
                     <button
                       onClick={() => handleToggleAdmin(user.id)}
-                      style={styles.adminButton}
+                      className="user-management-action-button"
                       title={user.isAdmin ? 'Remove Admin' : 'Make Admin'}
                     >
                       {user.isAdmin ? '👑' : '⭐'}
                     </button>
                     <button
                       onClick={() => handleResetPassword(user.id)}
-                      style={styles.resetButton}
+                      className="user-management-action-button"
                       title="Reset Password"
                     >
                       🔑
@@ -228,14 +369,14 @@ function UserManagement() {
                         });
                         setShowConfirmDialog(true);
                       }}
-                      style={user.isSuspended ? styles.unsuspendButton : styles.suspendButton}
+                      className={`user-management-action-button ${user.isSuspended ? 'user-management-unsuspend-button' : 'user-management-suspend-button'}`}
                       title={user.isSuspended ? 'Unsuspend' : 'Suspend'}
                     >
                       {user.isSuspended ? '✅' : '⛔'}
                     </button>
                     <button
                       onClick={() => handleDeleteUser(user.id)}
-                      style={styles.deleteButton}
+                      className="user-management-action-button user-management-delete-button"
                       title="Delete User"
                     >
                       🗑️
@@ -246,68 +387,103 @@ function UserManagement() {
             ))}
           </tbody>
         </table>
+
+        {filteredUsers.length === 0 && (
+          <div className="user-management-no-results">
+            <div className="user-management-no-results-icon">🔍</div>
+            <h3>No users found</h3>
+            <p>Try adjusting your search or filters</p>
+          </div>
+        )}
       </div>
 
       {/* User Details Modal */}
       {showUserModal && selectedUser && (
-        <div style={styles.modalOverlay} onClick={() => setShowUserModal(false)}>
-          <div style={styles.modal} onClick={e => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h2>User Details</h2>
-              <button onClick={() => setShowUserModal(false)} style={styles.closeButton}>✕</button>
+        <div className="user-management-modal-overlay" onClick={() => setShowUserModal(false)}>
+          <div className="user-management-modal" onClick={e => e.stopPropagation()}>
+            <div className="user-management-modal-header">
+              <h2 className="user-management-modal-title">User Profile</h2>
+              <button onClick={() => setShowUserModal(false)} className="user-management-modal-close">✕</button>
             </div>
-            <div style={styles.modalBody}>
-              <div style={styles.userProfileHeader}>
-                <Avatar user={selectedUser} size="large" />
-                <div>
+            
+            <div className="user-management-modal-body">
+              <div className="user-management-profile-header">
+                <Avatar user={selectedUser} size="xlarge" />
+                <div className="user-management-profile-title">
                   <h3>{selectedUser.name}</h3>
                   <p>{selectedUser.email}</p>
+                  <div className="user-management-profile-badges">
+                    {selectedUser.isAdmin && <span className="user-management-profile-admin-badge">Admin</span>}
+                    {selectedUser.isSuspended && <span className="user-management-profile-suspended-badge">Suspended</span>}
+                  </div>
                 </div>
               </div>
 
-              <div style={styles.userInfoGrid}>
-                <div style={styles.infoItem}>
-                  <label>Phone</label>
-                  <p>{selectedUser.phone || 'Not provided'}</p>
+              <div className="user-management-info-grid">
+                <div className="user-management-info-card">
+                  <div className="user-management-info-label">📞 Phone</div>
+                  <div className="user-management-info-value">{selectedUser.phone || 'Not provided'}</div>
                 </div>
-                <div style={styles.infoItem}>
-                  <label>Location</label>
-                  <p>{selectedUser.city || 'Not set'}</p>
+                <div className="user-management-info-card">
+                  <div className="user-management-info-label">📍 Location</div>
+                  <div className="user-management-info-value">
+                    {[selectedUser.city, selectedUser.region, selectedUser.country]
+                      .filter(Boolean).join(', ') || 'Not set'}
+                  </div>
                 </div>
-                <div style={styles.infoItem}>
-                  <label>Age</label>
-                  <p>{selectedUser.age || 'Not provided'}</p>
+                <div className="user-management-info-card">
+                  <div className="user-management-info-label">🎂 Age</div>
+                  <div className="user-management-info-value">{selectedUser.age || 'Not provided'}</div>
                 </div>
-                <div style={styles.infoItem}>
-                  <label>Gender</label>
-                  <p>{selectedUser.gender || 'Not specified'}</p>
+                <div className="user-management-info-card">
+                  <div className="user-management-info-label">⚥ Gender</div>
+                  <div className="user-management-info-value">{selectedUser.gender || 'Not specified'}</div>
                 </div>
-                <div style={styles.infoItem}>
-                  <label>Member Since</label>
-                  <p>{new Date(selectedUser.createdAt).toLocaleDateString()}</p>
+                <div className="user-management-info-card">
+                  <div className="user-management-info-label">📅 Joined</div>
+                  <div className="user-management-info-value">
+                    {new Date(selectedUser.createdAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <div className="user-management-info-card">
+                  <div className="user-management-info-label">⏱️ Last Active</div>
+                  <div className="user-management-info-value">
+                    {selectedUser.lastActiveAt 
+                      ? new Date(selectedUser.lastActiveAt).toLocaleDateString()
+                      : 'Never'}
+                  </div>
                 </div>
               </div>
 
               {selectedUser.isSuspended && (
-                <div style={styles.suspensionInfo}>
-                  <h4>Suspension Details</h4>
+                <div className="user-management-suspension-card">
+                  <h4 className="user-management-suspension-title">⛔ Suspension Details</h4>
                   <p><strong>Reason:</strong> {selectedUser.suspensionReason}</p>
-                  <p><strong>Until:</strong> {selectedUser.suspendedUntil ? new Date(selectedUser.suspendedUntil).toLocaleDateString() : 'Permanent'}</p>
+                  <p><strong>Until:</strong> {selectedUser.suspendedUntil 
+                    ? new Date(selectedUser.suspendedUntil).toLocaleDateString()
+                    : 'Permanent'}</p>
                 </div>
               )}
 
-              <div style={styles.modalActions}>
+              {selectedUser.adminNotes && (
+                <div className="user-management-notes-card">
+                  <h4 className="user-management-notes-title">📝 Admin Notes</h4>
+                  <p>{selectedUser.adminNotes}</p>
+                </div>
+              )}
+
+              <div className="user-management-modal-actions">
                 <button
                   onClick={() => handleToggleAdmin(selectedUser.id)}
-                  style={styles.modalAdminButton}
+                  className="user-management-modal-button"
                 >
-                  {selectedUser.isAdmin ? 'Remove Admin' : 'Make Admin'}
+                  {selectedUser.isAdmin ? '👑 Remove Admin' : '⭐ Make Admin'}
                 </button>
                 <button
                   onClick={() => handleResetPassword(selectedUser.id)}
-                  style={styles.modalResetButton}
+                  className="user-management-modal-button"
                 >
-                  Reset Password
+                  🔑 Reset Password
                 </button>
                 <button
                   onClick={() => {
@@ -319,15 +495,15 @@ function UserManagement() {
                     });
                     setShowConfirmDialog(true);
                   }}
-                  style={selectedUser.isSuspended ? styles.modalUnsuspendButton : styles.modalSuspendButton}
+                  className={`user-management-modal-button ${selectedUser.isSuspended ? 'user-management-modal-unsuspend-button' : 'user-management-modal-suspend-button'}`}
                 >
-                  {selectedUser.isSuspended ? 'Unsuspend' : 'Suspend'}
+                  {selectedUser.isSuspended ? '✅ Unsuspend User' : '⛔ Suspend User'}
                 </button>
                 <button
                   onClick={() => handleDeleteUser(selectedUser.id)}
-                  style={styles.modalDeleteButton}
+                  className="user-management-modal-button user-management-modal-delete-button"
                 >
-                  Delete User
+                  🗑️ Delete User
                 </button>
               </div>
             </div>
@@ -337,31 +513,42 @@ function UserManagement() {
 
       {/* Confirmation Dialog */}
       {showConfirmDialog && confirmAction && (
-        <div style={styles.modalOverlay} onClick={() => setShowConfirmDialog(false)}>
-          <div style={styles.confirmDialog} onClick={e => e.stopPropagation()}>
-            <h3>Confirm Action</h3>
+        <div className="user-management-modal-overlay" onClick={() => setShowConfirmDialog(false)}>
+          <div className="user-management-confirm-dialog" onClick={e => e.stopPropagation()}>
+            <div className="user-management-confirm-header">
+              <span className="user-management-confirm-icon">⚠️</span>
+              <h3 className="user-management-confirm-title">
+                {confirmAction.type === 'suspend' ? 'Suspend User' : 'Confirm Action'}
+              </h3>
+            </div>
+            
             {confirmAction.type === 'suspend' && (
-              <div>
-                <p>Suspend {confirmAction.user.name}?</p>
-                <div style={styles.formGroup}>
-                  <label>Reason:</label>
+              <div className="user-management-confirm-body">
+                <p className="user-management-confirm-message">
+                  Suspend <strong>{confirmAction.user?.name}</strong>?
+                </p>
+                
+                <div className="user-management-form-group">
+                  <label className="user-management-form-label">Reason for suspension:</label>
                   <textarea
                     placeholder="Enter reason..."
-                    style={styles.textarea}
+                    className="user-management-textarea"
                     rows="3"
                     id="suspendReason"
                   />
                 </div>
-                <div style={styles.formGroup}>
-                  <label>Duration:</label>
-                  <select style={styles.select} id="suspendDuration">
+                
+                <div className="user-management-form-group">
+                  <label className="user-management-form-label">Duration:</label>
+                  <select className="user-management-select" id="suspendDuration">
                     <option value="1">1 day</option>
                     <option value="7">7 days</option>
                     <option value="30">30 days</option>
                     <option value="permanent">Permanent</option>
                   </select>
                 </div>
-                <div style={styles.confirmActions}>
+
+                <div className="user-management-confirm-actions">
                   <button
                     onClick={() => {
                       const reason = document.getElementById('suspendReason').value;
@@ -373,13 +560,67 @@ function UserManagement() {
                         alert('Please provide a reason');
                       }
                     }}
-                    style={styles.confirmButton}
+                    className="user-management-confirm-button"
                   >
                     Confirm Suspension
                   </button>
                   <button
                     onClick={() => setShowConfirmDialog(false)}
-                    style={styles.cancelButton}
+                    className="user-management-cancel-button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {confirmAction.type === 'bulk_suspend' && (
+              <div className="user-management-confirm-body">
+                <p className="user-management-confirm-message">
+                  Suspend <strong>{selectedUsers.length} selected users</strong>?
+                </p>
+                
+                <div className="user-management-form-group">
+                  <label className="user-management-form-label">Reason for suspension:</label>
+                  <textarea
+                    placeholder="Enter reason..."
+                    className="user-management-textarea"
+                    rows="3"
+                    id="suspendReason"
+                  />
+                </div>
+                
+                <div className="user-management-form-group">
+                  <label className="user-management-form-label">Duration:</label>
+                  <select className="user-management-select" id="suspendDuration">
+                    <option value="1">1 day</option>
+                    <option value="7">7 days</option>
+                    <option value="30">30 days</option>
+                    <option value="permanent">Permanent</option>
+                  </select>
+                </div>
+
+                <div className="user-management-confirm-actions">
+                  <button
+                    onClick={() => {
+                      const reason = document.getElementById('suspendReason').value;
+                      const duration = document.getElementById('suspendDuration').value;
+                      if (reason) {
+                        confirmAction.onConfirm(reason, duration);
+                        setShowConfirmDialog(false);
+                        setSelectedUsers([]);
+                        setSelectAll(false);
+                      } else {
+                        alert('Please provide a reason');
+                      }
+                    }}
+                    className="user-management-confirm-button"
+                  >
+                    Confirm Bulk Suspension
+                  </button>
+                  <button
+                    onClick={() => setShowConfirmDialog(false)}
+                    className="user-management-cancel-button"
                   >
                     Cancel
                   </button>
@@ -392,323 +633,5 @@ function UserManagement() {
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: '20px',
-  },
-  loading: {
-    textAlign: 'center',
-    padding: '50px',
-    fontSize: '18px',
-    color: '#666',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '20px',
-    flexWrap: 'wrap',
-    gap: '15px',
-  },
-  title: {
-    margin: 0,
-    color: '#333',
-    fontSize: '24px',
-  },
-  userFilters: {
-    display: 'flex',
-    gap: '10px',
-    flexWrap: 'wrap',
-  },
-  searchInput: {
-    padding: '8px 12px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-    width: '250px',
-    fontSize: '14px',
-  },
-  filterSelect: {
-    padding: '8px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-    fontSize: '14px',
-    minWidth: '120px',
-  },
-  userTable: {
-    overflowX: 'auto',
-    backgroundColor: 'white',
-    borderRadius: '8px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: '14px',
-  },
-  userCell: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  userName: {
-    fontWeight: '500',
-    color: '#333',
-  },
-  userEmail: {
-    fontSize: '12px',
-    color: '#999',
-  },
-  roleBadge: {
-    padding: '4px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-    backgroundColor: '#f0f0f0',
-    color: '#666',
-  },
-  adminRole: {
-    backgroundColor: '#9b59b6',
-    color: 'white',
-  },
-  moderatorRole: {
-    backgroundColor: '#3498db',
-    color: 'white',
-  },
-  statusBadge: {
-    padding: '4px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-  },
-  activeStatus: {
-    backgroundColor: '#27ae60',
-    color: 'white',
-  },
-  suspendedStatus: {
-    backgroundColor: '#e74c3c',
-    color: 'white',
-  },
-  actionButtons: {
-    display: 'flex',
-    gap: '5px',
-  },
-  viewButton: {
-    padding: '5px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    backgroundColor: '#3498db',
-    color: 'white',
-    fontSize: '14px',
-  },
-  adminButton: {
-    padding: '5px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    backgroundColor: '#9b59b6',
-    color: 'white',
-    fontSize: '14px',
-  },
-  resetButton: {
-    padding: '5px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    backgroundColor: '#f39c12',
-    color: 'white',
-    fontSize: '14px',
-  },
-  suspendButton: {
-    padding: '5px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    backgroundColor: '#e74c3c',
-    color: 'white',
-    fontSize: '14px',
-  },
-  unsuspendButton: {
-    padding: '5px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    backgroundColor: '#27ae60',
-    color: 'white',
-    fontSize: '14px',
-  },
-  deleteButton: {
-    padding: '5px',
-    border: 'none',
-    borderRadius: '3px',
-    cursor: 'pointer',
-    backgroundColor: '#c0392b',
-    color: 'white',
-    fontSize: '14px',
-  },
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-  },
-  modal: {
-    backgroundColor: 'white',
-    borderRadius: '10px',
-    maxWidth: '500px',
-    width: '90%',
-    maxHeight: '90vh',
-    overflow: 'auto',
-  },
-  modalHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '20px',
-    borderBottom: '1px solid #eee',
-  },
-  closeButton: {
-    background: 'none',
-    border: 'none',
-    fontSize: '20px',
-    cursor: 'pointer',
-    color: '#999',
-  },
-  modalBody: {
-    padding: '20px',
-  },
-  userProfileHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '20px',
-    marginBottom: '20px',
-  },
-  userInfoGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '15px',
-    marginBottom: '20px',
-  },
-  infoItem: {
-    '& label': {
-      display: 'block',
-      fontSize: '12px',
-      color: '#999',
-      marginBottom: '3px',
-    },
-    '& p': {
-      margin: 0,
-      fontWeight: '500',
-    },
-  },
-  suspensionInfo: {
-    padding: '15px',
-    backgroundColor: '#fff3cd',
-    borderRadius: '8px',
-    marginBottom: '20px',
-  },
-  modalActions: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '10px',
-  },
-  modalAdminButton: {
-    padding: '10px',
-    backgroundColor: '#9b59b6',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  modalResetButton: {
-    padding: '10px',
-    backgroundColor: '#f39c12',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  modalSuspendButton: {
-    padding: '10px',
-    backgroundColor: '#e74c3c',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  modalUnsuspendButton: {
-    padding: '10px',
-    backgroundColor: '#27ae60',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  modalDeleteButton: {
-    padding: '10px',
-    backgroundColor: '#c0392b',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-  },
-  confirmDialog: {
-    backgroundColor: 'white',
-    padding: '30px',
-    borderRadius: '10px',
-    maxWidth: '400px',
-    width: '90%',
-  },
-  formGroup: {
-    marginBottom: '15px',
-  },
-  textarea: {
-    width: '100%',
-    padding: '8px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-    marginTop: '5px',
-    fontFamily: 'inherit',
-    fontSize: '14px',
-  },
-  select: {
-    width: '100%',
-    padding: '8px',
-    borderRadius: '5px',
-    border: '1px solid #ddd',
-    marginTop: '5px',
-    fontSize: '14px',
-  },
-  confirmActions: {
-    display: 'flex',
-    gap: '10px',
-    marginTop: '20px',
-  },
-  confirmButton: {
-    flex: 1,
-    padding: '10px',
-    backgroundColor: '#e74c3c',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '14px',
-  },
-  cancelButton: {
-    flex: 1,
-    padding: '10px',
-    backgroundColor: '#95a5a6',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '14px',
-  },
-};
 
 export default UserManagement;

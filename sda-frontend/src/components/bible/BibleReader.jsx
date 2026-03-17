@@ -1,383 +1,538 @@
 // src/components/bible/BibleReader.jsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { bibleService } from '../../services/bibleService';
-import { useAuth } from '../../contexts/AuthContext';
-import './BibleReader.css'; // Import the CSS file
+import { 
+  getBookNames, 
+  getChapterArray,
+  BOOK_CHAPTERS_MAP,
+} from '../../constants/bibleData';
+import ShareVerseModal from './ShareVerseModal';
+import './BibleReader.css';
 
-const BibleReader = ({ onClose, onSelectVerse }) => {
-  const { user } = useAuth();
+const BibleReader = ({ 
+  mode = 'fullscreen',
+  initialBook = 'Genesis',
+  initialChapter = 1,
+  onClose,
+  onVerseSelect 
+}) => {
+  const navigate = useNavigate();
+  const params = useParams();
   const versesContainerRef = useRef(null);
-  const [selectedText, setSelectedText] = useState('');
-  const [selectedVerseForShare, setSelectedVerseForShare] = useState(null);
-  const [showShareModal, setShowShareModal] = useState(false);
   
-  // Bible data
-  const [selectedBook, setSelectedBook] = useState('Luke');
-  const [selectedChapter, setSelectedChapter] = useState(1);
+  const [selectedBook, setSelectedBook] = useState(params.book || initialBook);
+  const [selectedChapter, setSelectedChapter] = useState(
+    params.chapter ? parseInt(params.chapter) : initialChapter
+  );
+  
   const [verses, setVerses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [translations, setTranslations] = useState([]);
-  const [selectedTranslation, setSelectedTranslation] = useState('kjv');
-  
-  // Reading preferences
-  const [fontSize, setFontSize] = useState(18);
-  const [darkMode, setDarkMode] = useState(false);
-  
-  // All books of the Bible
-  const books = [
-    'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth',
-    '1 Samuel', '2 Samuel', '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra', 'Nehemiah',
-    'Esther', 'Job', 'Psalms', 'Proverbs', 'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah',
-    'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos', 'Obadiah', 'Jonah', 'Micah',
-    'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
-    'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', '1 Corinthians', '2 Corinthians',
-    'Galatians', 'Ephesians', 'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians',
-    '1 Timothy', '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James', '1 Peter', '2 Peter',
-    '1 John', '2 John', '3 John', 'Jude', 'Revelation'
-  ];
+  const [fontSize, setFontSize] = useState(
+    parseInt(localStorage.getItem('bibleFontSize')) || 20
+  );
+  const [darkMode, setDarkMode] = useState(
+    localStorage.getItem('bibleDarkMode') === 'true' || false
+  );
+  const [showSettings, setShowSettings] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [currentNote, setCurrentNote] = useState('');
+  const [savedNotes, setSavedNotes] = useState({});
 
-  // Chapter mapping for each book
-  const bookChapters = {
-    'Genesis': 50, 'Exodus': 40, 'Leviticus': 27, 'Numbers': 36, 'Deuteronomy': 34,
-    'Joshua': 24, 'Judges': 21, 'Ruth': 4, '1 Samuel': 31, '2 Samuel': 24,
-    '1 Kings': 22, '2 Kings': 25, '1 Chronicles': 29, '2 Chronicles': 36,
-    'Ezra': 10, 'Nehemiah': 13, 'Esther': 10, 'Job': 42, 'Psalms': 150,
-    'Proverbs': 31, 'Ecclesiastes': 12, 'Song of Solomon': 8, 'Isaiah': 66,
-    'Jeremiah': 52, 'Lamentations': 5, 'Ezekiel': 48, 'Daniel': 12,
-    'Hosea': 14, 'Joel': 3, 'Amos': 9, 'Obadiah': 1, 'Jonah': 4,
-    'Micah': 7, 'Nahum': 3, 'Habakkuk': 3, 'Zephaniah': 3, 'Haggai': 2,
-    'Zechariah': 14, 'Malachi': 4,
-    'Matthew': 28, 'Mark': 16, 'Luke': 24, 'John': 21, 'Acts': 28,
-    'Romans': 16, '1 Corinthians': 16, '2 Corinthians': 13, 'Galatians': 6,
-    'Ephesians': 6, 'Philippians': 4, 'Colossians': 4, '1 Thessalonians': 5,
-    '2 Thessalonians': 3, '1 Timothy': 6, '2 Timothy': 4, 'Titus': 3,
-    'Philemon': 1, 'Hebrews': 13, 'James': 5, '1 Peter': 5, '2 Peter': 3,
-    '1 John': 5, '2 John': 1, '3 John': 1, 'Jude': 1, 'Revelation': 22
-  };
+  // Selection menu state
+  const [selectionMenu, setSelectionMenu] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+    text: '',
+    verses: []
+  });
+  const [showCopyToast, setShowCopyToast] = useState(false);
 
-  // Load translations on mount
+  // Share modal state
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [selectedVerse, setSelectedVerse] = useState(null);
+
+  const books = getBookNames();
+  const chapterOptions = getChapterArray(selectedBook);
+
   useEffect(() => {
-    const loadTranslations = async () => {
-      try {
-        const res = await bibleService.getTranslations();
-        setTranslations(res.data.data || []);
-      } catch (err) {
-        console.error('Error loading translations:', err);
+    if (mode === 'fullscreen' && !params.book) {
+      const savedPosition = localStorage.getItem('bibleReadingPosition');
+      if (savedPosition) {
+        const { book, chapter } = JSON.parse(savedPosition);
+        setSelectedBook(book);
+        setSelectedChapter(chapter);
       }
-    };
-    loadTranslations();
+    }
+  }, [mode, params.book]);
+
+  useEffect(() => {
+    if (selectedBook && selectedChapter && mode === 'fullscreen') {
+      localStorage.setItem('bibleReadingPosition', JSON.stringify({
+        book: selectedBook,
+        chapter: selectedChapter,
+        timestamp: new Date().toISOString()
+      }));
+    }
+  }, [selectedBook, selectedChapter, mode]);
+
+  useEffect(() => {
+    const notes = localStorage.getItem('bibleNotes');
+    if (notes) {
+      setSavedNotes(JSON.parse(notes));
+    }
   }, []);
 
-  // Update max chapters when book changes
   useEffect(() => {
-    setMaxChapter(bookChapters[selectedBook] || 150);
-    setSelectedChapter(1);
-  }, [selectedBook]);
+    if (mode === 'fullscreen' && navigate) {
+      navigate(`/bible/read/${selectedBook}/${selectedChapter}`, { replace: true });
+    }
+  }, [selectedBook, selectedChapter, mode, navigate]);
 
-  // Fetch chapter when book/chapter/translation changes
   useEffect(() => {
     fetchChapter();
-  }, [selectedBook, selectedChapter, selectedTranslation]);
+  }, [selectedBook, selectedChapter]);
 
-  const setMaxChapter = (max) => {
-    // This is just for the select dropdown
-  };
+  useEffect(() => {
+    localStorage.setItem('bibleFontSize', fontSize);
+  }, [fontSize]);
+
+  useEffect(() => {
+    localStorage.setItem('bibleDarkMode', darkMode);
+  }, [darkMode]);
+
+  // Handle text selection
+  useEffect(() => {
+    const handleSelection = () => {
+      const selection = window.getSelection();
+      const selectedText = selection.toString().trim();
+      
+      if (selectedText.length > 0 && versesContainerRef.current?.contains(selection.anchorNode)) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        const selectedVerses = [];
+        verses.forEach(verse => {
+          if (selectedText.includes(verse.text.substring(0, 20))) {
+            selectedVerses.push(verse);
+          }
+        });
+        
+        setSelectionMenu({
+          show: true,
+          x: rect.left + rect.width / 2,
+          y: rect.top - 10,
+          text: selectedText,
+          verses: selectedVerses.length > 0 ? selectedVerses : [verses[0]]
+        });
+      } else {
+        setSelectionMenu({ show: false, x: 0, y: 0, text: '', verses: [] });
+      }
+    };
+
+    document.addEventListener('mouseup', handleSelection);
+    document.addEventListener('touchend', handleSelection);
+
+    return () => {
+      document.removeEventListener('mouseup', handleSelection);
+      document.removeEventListener('touchend', handleSelection);
+    };
+  }, [verses]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (selectionMenu.show && !e.target.closest('.selection-menu')) {
+        setSelectionMenu({ show: false, x: 0, y: 0, text: '', verses: [] });
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [selectionMenu.show]);
 
   const fetchChapter = async () => {
     setLoading(true);
     setError('');
-    setSelectedText('');
-    setSelectedVerseForShare(null);
-    
     try {
-      const response = await bibleService.getChapter(selectedBook, selectedChapter, selectedTranslation);
-      
-      let versesData = [];
-      if (response.data?.data) {
-        versesData = response.data.data;
-      } else if (response.data) {
-        versesData = response.data;
-      } else if (response.verses) {
-        versesData = response.verses;
-      }
-      
-      // Sort verses by verse number
+      const response = await bibleService.getChapter(selectedBook, selectedChapter, 'kjv');
+      let versesData = response.data?.data || response.data || response.verses || [];
       versesData.sort((a, b) => a.verse - b.verse);
       setVerses(versesData);
       
-      if (versesData.length === 0) {
-        setError(`No verses found for ${selectedBook} ${selectedChapter}`);
+      const noteKey = `${selectedBook}_${selectedChapter}`;
+      if (savedNotes[noteKey]) {
+        setCurrentNote(savedNotes[noteKey]);
+      } else {
+        setCurrentNote('');
       }
     } catch (err) {
-      console.error('Error fetching chapter:', err);
-      setError('Failed to load chapter. Please try again.');
+      setError('Failed to load chapter');
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle text selection
-  const handleTextSelection = useCallback(() => {
-    const selection = window.getSelection();
-    const selectedText = selection.toString().trim();
-    
-    if (selectedText) {
-      setSelectedText(selectedText);
+  const handlePrevChapter = () => {
+    if (selectedChapter > 1) {
+      setSelectedChapter(selectedChapter - 1);
     } else {
-      setSelectedText('');
-    }
-  }, []);
-
-  // Handle verse hover for sharing
-  const handleVerseHover = (verse) => {
-    setSelectedVerseForShare(verse);
-  };
-
-  const handleVerseLeave = () => {
-    // Don't clear immediately to allow clicking the tooltip
-    setTimeout(() => {
-      setSelectedVerseForShare(null);
-    }, 200);
-  };
-
-  const handleShareClick = (verse) => {
-    setSelectedVerseForShare(verse);
-    setShowShareModal(true);
-  };
-
-  const handleSelectionShare = () => {
-    if (selectedText) {
-      // Find which verse contains the selected text
-      const verse = verses.find(v => v.text.includes(selectedText.substring(0, 20)));
-      if (verse) {
-        setSelectedVerseForShare(verse);
-        setShowShareModal(true);
+      const bookIndex = books.indexOf(selectedBook);
+      if (bookIndex > 0) {
+        const prevBook = books[bookIndex - 1];
+        setSelectedBook(prevBook);
+        setSelectedChapter(BOOK_CHAPTERS_MAP[prevBook]);
       }
     }
   };
 
-  const increaseFontSize = () => {
-    setFontSize(prev => Math.min(prev + 2, 24));
-  };
-
-  const decreaseFontSize = () => {
-    setFontSize(prev => Math.max(prev - 2, 14));
-  };
-
-  const toggleDarkMode = () => {
-    setDarkMode(prev => !prev);
-  };
-
-  const scrollToTop = () => {
-    if (versesContainerRef.current) {
-      versesContainerRef.current.scrollTop = 0;
+  const handleNextChapter = () => {
+    if (selectedChapter < BOOK_CHAPTERS_MAP[selectedBook]) {
+      setSelectedChapter(selectedChapter + 1);
+    } else {
+      const bookIndex = books.indexOf(selectedBook);
+      if (bookIndex < books.length - 1) {
+        setSelectedBook(books[bookIndex + 1]);
+        setSelectedChapter(1);
+      }
     }
   };
 
-  const getChapterRange = () => {
-    const max = bookChapters[selectedBook] || 150;
-    return Array.from({ length: max }, (_, i) => i + 1);
+  const handleSaveNote = () => {
+    const key = `${selectedBook}_${selectedChapter}`;
+    const updatedNotes = {
+      ...savedNotes,
+      [key]: currentNote
+    };
+    setSavedNotes(updatedNotes);
+    localStorage.setItem('bibleNotes', JSON.stringify(updatedNotes));
+    setShowNotes(false);
   };
 
-  return (
-    <div className="bible-reader-overlay" onClick={onClose}>
-      <div 
-        className={`bible-reader-modal ${darkMode ? 'dark-mode' : ''}`} 
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="bible-reader-header">
-          <h2 className="bible-reader-title">📖 Bible Reader</h2>
-          <button className="bible-reader-close-btn" onClick={onClose}>✕</button>
-        </div>
+  const increaseFontSize = () => setFontSize(prev => Math.min(prev + 2, 32));
+  const decreaseFontSize = () => setFontSize(prev => Math.max(prev - 2, 14));
 
-        {/* Controls Bar */}
-        <div className="bible-reader-controls">
-          <div className="bible-reader-controls-left">
-            <select
+  const handleVerseClick = (verse) => {
+    if (onVerseSelect) {
+      onVerseSelect(verse);
+    }
+  };
+
+  const handleCopy = async () => {
+    try {
+      let textToCopy = selectionMenu.text;
+      
+      if (selectionMenu.verses.length > 0) {
+        const verseRefs = selectionMenu.verses.map(v => v.verse).join(', ');
+        textToCopy = `"${selectionMenu.text}"\n\n${selectedBook} ${selectedChapter}:${verseRefs} (KJV)`;
+      }
+      
+      await navigator.clipboard.writeText(textToCopy);
+      setShowCopyToast(true);
+      setSelectionMenu({ show: false, x: 0, y: 0, text: '', verses: [] });
+      
+      setTimeout(() => setShowCopyToast(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleShare = () => {
+    // Create a verse object from the selected text
+    const primaryVerse = selectionMenu.verses[0] || verses[0];
+    
+    const verseToShare = {
+      id: primaryVerse.id,
+      reference: `${selectedBook} ${selectedChapter}:${primaryVerse.verse}`,
+      text: selectionMenu.text || primaryVerse.text,
+      book: selectedBook,
+      chapter: selectedChapter,
+      verse: primaryVerse.verse
+    };
+    
+    setSelectedVerse(verseToShare);
+    setShowShareModal(true);
+    setSelectionMenu({ show: false, x: 0, y: 0, text: '', verses: [] });
+  };
+
+  if (mode === 'modal') {
+    return (
+      <div className="bible-reader-overlay" onClick={onClose}>
+        <div 
+          className={`bible-reader-modal ${darkMode ? 'dark-mode' : ''}`} 
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="bible-reader-header">
+            <div className="header-left">
+              <h2>📖 Bible Reader</h2>
+            </div>
+            <div className="header-right">
+              <button 
+                onClick={() => window.open(`/bible/read/${selectedBook}/${selectedChapter}`, '_blank')}
+                className="icon-btn"
+                title="Open in Full Screen"
+              >
+                ⛶
+              </button>
+              <button onClick={() => setDarkMode(!darkMode)} className="icon-btn">
+                {darkMode ? '☀️' : '🌙'}
+              </button>
+              <button onClick={onClose} className="icon-btn">✕</button>
+            </div>
+          </div>
+
+          <div className="bible-reader-controls">
+            <select 
               value={selectedBook}
               onChange={(e) => setSelectedBook(e.target.value)}
-              className="bible-reader-select"
+              className="book-select"
             >
               {books.map(book => (
                 <option key={book} value={book}>{book}</option>
               ))}
             </select>
-
-            <select
+            
+            <select 
               value={selectedChapter}
               onChange={(e) => setSelectedChapter(Number(e.target.value))}
-              className="bible-reader-select"
+              className="chapter-select"
             >
-              {getChapterRange().map(ch => (
+              {chapterOptions.map(ch => (
                 <option key={ch} value={ch}>Chapter {ch}</option>
               ))}
             </select>
 
-            <select
-              value={selectedTranslation}
-              onChange={(e) => setSelectedTranslation(e.target.value)}
-              className="bible-reader-select"
-            >
-              {translations.map(t => (
-                <option key={t.code} value={t.code}>{t.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <div className="bible-reader-font-controls">
-              <button onClick={decreaseFontSize} className="bible-reader-font-btn" title="Decrease font size">A-</button>
-              <span className="bible-reader-font-size">{fontSize}px</span>
-              <button onClick={increaseFontSize} className="bible-reader-font-btn" title="Increase font size">A+</button>
+            <div className="font-controls">
+              <button onClick={decreaseFontSize}>A-</button>
+              <span>{fontSize}px</span>
+              <button onClick={increaseFontSize}>A+</button>
             </div>
-            <button onClick={toggleDarkMode} className="bible-reader-theme-btn">
-              {darkMode ? '☀️ Light' : '🌙 Dark'}
-            </button>
           </div>
-        </div>
 
-        {/* Chapter Info */}
-        <div className="bible-reader-chapter-info">
-          <h3 className="bible-reader-chapter-title">
-            {selectedBook} {selectedChapter}
-          </h3>
-          <p className="bible-reader-chapter-subtitle">
-            {selectedTranslation.toUpperCase()} • {verses.length} verses
-          </p>
-        </div>
-
-        {/* Text Selection Indicator (appears when text is selected) */}
-        {selectedText && (
-          <div className="bible-reader-reflection">
-            <p>✨ "{selectedText.substring(0, 100)}..."</p>
-            <button 
-              className="bible-reader-reflection-btn"
-              onClick={handleSelectionShare}
-            >
-              Share this passage
-            </button>
-          </div>
-        )}
-
-        {/* Loading State */}
-        {loading && (
-          <div className="bible-reader-loading">
-            <div className="bible-reader-spinner"></div>
-            <p>Loading chapter...</p>
-          </div>
-        )}
-
-        {/* Error State */}
-        {error && !loading && (
-          <div className="bible-reader-error">
-            <p>{error}</p>
-            <button onClick={fetchChapter} className="bible-reader-retry-btn">
-              Try Again
-            </button>
-          </div>
-        )}
-
-        {/* Verses Container */}
-        {!loading && !error && (
           <div 
             ref={versesContainerRef}
-            className="bible-reader-verses"
-            onMouseUp={handleTextSelection}
+            className="bible-reader-verses" 
             style={{ fontSize: `${fontSize}px` }}
           >
-            {verses.length === 0 ? (
-              <div className="bible-reader-no-verses">
-                <p>No verses found</p>
-                <button onClick={fetchChapter} className="bible-reader-retry-btn">
-                  Retry
-                </button>
-              </div>
+            {loading ? (
+              <div className="loading">Loading...</div>
+            ) : error ? (
+              <div className="error">{error}</div>
             ) : (
-              verses.map((verse) => (
-                <div
-                  key={verse.id || verse.verse}
-                  className={`bible-reader-verse ${
-                    selectedVerseForShare?.verse === verse.verse ? 'selected-for-share' : ''
-                  }`}
-                  onMouseEnter={() => handleVerseHover(verse)}
-                  onMouseLeave={handleVerseLeave}
+              verses.map(verse => (
+                <div 
+                  key={verse.verse} 
+                  className="verse"
+                  onClick={() => handleVerseClick(verse)}
                 >
-                  <span className="bible-reader-verse-number">{verse.verse}</span>
-                  <span className="bible-reader-verse-text">{verse.text}</span>
-                  
-                  {/* Share tooltip appears on hover */}
-                  {user && selectedVerseForShare?.verse === verse.verse && (
-                    <button
-                      className="bible-reader-share-tooltip"
-                      onClick={() => handleShareClick(verse)}
-                    >
-                      📤 Share
-                    </button>
-                  )}
+                  <span className="verse-num">{verse.verse}</span>
+                  <span className="verse-text">{verse.text}</span>
                 </div>
               ))
             )}
-            
-            {/* End of chapter indicator with reflection prompt */}
-            {verses.length > 0 && (
-              <div className="bible-reader-end-chapter">
-                <p>— End of {selectedBook} {selectedChapter} —</p>
-                <div className="bible-reader-reflection">
-                  <p>💭 What did this chapter teach you?</p>
-                  <button className="bible-reader-reflection-btn">
-                    Write a reflection
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
-        )}
 
-        {/* Footer */}
-        <div className="bible-reader-footer">
-          <button onClick={scrollToTop} className="bible-reader-scroll-top">
-            ↑ Scroll to Top
-          </button>
-          <p className="bible-reader-note">
-            {user 
-              ? 'Hover over any verse to share • Select text to highlight'
-              : 'Login to share verses and write reflections'}
-          </p>
+          {selectionMenu.show && (
+            <div 
+              className="selection-menu"
+              style={{
+                position: 'fixed',
+                left: `${selectionMenu.x}px`,
+                top: `${selectionMenu.y}px`,
+                transform: 'translate(-50%, -100%)'
+              }}
+            >
+              <button onClick={handleCopy} className="selection-menu-btn copy">
+                📋 Copy
+              </button>
+              <button onClick={handleShare} className="selection-menu-btn share">
+                📤 Share
+              </button>
+            </div>
+          )}
+
+          {showCopyToast && (
+            <div className="copy-success-toast">
+              ✓ Copied to clipboard!
+            </div>
+          )}
+
+          {/* ShareVerseModal */}
+          {showShareModal && selectedVerse && (
+            <ShareVerseModal
+              verse={selectedVerse}
+              onClose={() => {
+                setShowShareModal(false);
+                setSelectedVerse(null);
+              }}
+              onSuccess={(data) => {
+                console.log('Verse shared successfully:', data);
+                setShowShareModal(false);
+                setSelectedVerse(null);
+              }}
+            />
+          )}
         </div>
       </div>
+    );
+  }
 
-      {/* Share Modal */}
-      {showShareModal && selectedVerseForShare && (
-        <div className="bible-reader-selection-modal">
-          <h3>Share This Verse</h3>
-          <div className="bible-reader-selection-preview">
-            <strong>{selectedBook} {selectedChapter}:{selectedVerseForShare.verse}</strong>
-            <p>"{selectedVerseForShare.text.substring(0, 100)}..."</p>
-          </div>
-          <div className="bible-reader-selection-actions">
-            <button 
-              className="bible-reader-selection-cancel"
-              onClick={() => {
-                setShowShareModal(false);
-                setSelectedVerseForShare(null);
-              }}
-            >
-              Cancel
-            </button>
-            <button 
-              className="bible-reader-selection-share"
-              onClick={() => {
-                // Handle share logic here
-                console.log('Sharing:', selectedVerseForShare);
-                setShowShareModal(false);
-              }}
-            >
-              Share
-            </button>
+  return (
+    <div className={`bible-full ${darkMode ? 'dark-mode' : ''}`}>
+      <header className="bible-full-header">
+        <div className="header-left">
+          <button 
+            className="icon-btn"
+            onClick={() => navigate('/dashboard')}
+            title="Back to Dashboard"
+          >
+            ←
+          </button>
+          <select 
+            value={selectedBook}
+            onChange={(e) => setSelectedBook(e.target.value)}
+            className="book-select"
+          >
+            {books.map(book => (
+              <option key={book} value={book}>{book}</option>
+            ))}
+          </select>
+          
+          <select 
+            value={selectedChapter}
+            onChange={(e) => setSelectedChapter(Number(e.target.value))}
+            className="chapter-select"
+          >
+            {chapterOptions.map(ch => (
+              <option key={ch} value={ch}>Chapter {ch}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="header-right">
+          <button onClick={() => setShowSettings(!showSettings)} className="icon-btn" title="Settings">
+            ⚙️
+          </button>
+          <button onClick={() => setShowNotes(!showNotes)} className="icon-btn" title="Notes">
+            📝
+          </button>
+          <button onClick={() => setDarkMode(!darkMode)} className="icon-btn" title="Toggle Theme">
+            {darkMode ? '☀️' : '🌙'}
+          </button>
+          <button onClick={() => navigate('/dashboard')} className="icon-btn" title="Close">
+            ✕
+          </button>
+        </div>
+      </header>
+
+      {showSettings && (
+        <div className="settings-panel">
+          <div className="settings-content">
+            <div className="font-controls">
+              <span>Font Size: {fontSize}px</span>
+              <div>
+                <button onClick={decreaseFontSize}>A-</button>
+                <button onClick={increaseFontSize}>A+</button>
+              </div>
+            </div>
+            <div className="reading-progress">
+              <span>Chapter {selectedChapter} of {BOOK_CHAPTERS_MAP[selectedBook]}</span>
+            </div>
           </div>
         </div>
+      )}
+
+      {showNotes && (
+        <div className="notes-panel">
+          <div className="notes-header">
+            <h3>Notes for {selectedBook} {selectedChapter}</h3>
+            <button onClick={() => setShowNotes(false)}>✕</button>
+          </div>
+          <textarea
+            value={currentNote}
+            onChange={(e) => setCurrentNote(e.target.value)}
+            placeholder="Write your reflections here..."
+            rows={10}
+          />
+          <button onClick={handleSaveNote} className="save-note-btn">
+            Save Note
+          </button>
+        </div>
+      )}
+
+      <main className="bible-full-content">
+        <div className="chapter-header">
+          <h1>{selectedBook} {selectedChapter}</h1>
+          <div className="chapter-nav">
+            <button onClick={handlePrevChapter} className="nav-btn">← Previous</button>
+            <button onClick={handleNextChapter} className="nav-btn">Next →</button>
+          </div>
+        </div>
+
+        <div 
+          ref={versesContainerRef}
+          className="verses-container"
+          style={{ fontSize: `${fontSize}px` }}
+        >
+          {loading ? (
+            <div className="loading">Loading...</div>
+          ) : error ? (
+            <div className="error">{error}</div>
+          ) : (
+            verses.map(verse => (
+              <div 
+                key={verse.verse} 
+                className="verse"
+                onClick={() => handleVerseClick(verse)}
+              >
+                <span className="verse-num">{verse.verse}</span>
+                <span className="verse-text">{verse.text}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </main>
+
+      {selectionMenu.show && (
+        <div 
+          className="selection-menu"
+          style={{
+            position: 'fixed',
+            left: `${selectionMenu.x}px`,
+            top: `${selectionMenu.y}px`,
+            transform: 'translate(-50%, -100%)'
+          }}
+        >
+          <button onClick={handleCopy} className="selection-menu-btn copy">
+            📋 Copy
+          </button>
+          <button onClick={handleShare} className="selection-menu-btn share">
+            📤 Share
+          </button>
+        </div>
+      )}
+
+      {showCopyToast && (
+        <div className="copy-success-toast">
+          ✓ Copied to clipboard!
+        </div>
+      )}
+
+      {/* ShareVerseModal */}
+      {showShareModal && selectedVerse && (
+        <ShareVerseModal
+          verse={selectedVerse}
+          onClose={() => {
+            setShowShareModal(false);
+            setSelectedVerse(null);
+          }}
+          onSuccess={(data) => {
+            console.log('Verse shared successfully:', data);
+            setShowShareModal(false);
+            setSelectedVerse(null);
+          }}
+        />
       )}
     </div>
   );

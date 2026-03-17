@@ -3,17 +3,23 @@ import { useState } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { createGroup } from '../../../services/api';
 import { GROUP_CATEGORIES } from '../../../utils/groupCategories';
+import { useNavigate } from 'react-router-dom';
+import './Group.css';
 
 function CreateGroup({ onClose, onGroupCreated }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     category: 'BIBLE_STUDY',
-    location: user?.city || '',
+    location: '',
     isPrivate: false,
     requireApproval: true,
     rules: '',
+    // NEW FIELDS
+    isLocationBased: false,
+    meetingType: 'online',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,11 +30,41 @@ function CreateGroup({ onClose, onGroupCreated }) {
     setError('');
 
     try {
-      await createGroup(formData);
-      onGroupCreated();
+      const response = await createGroup(formData);
+      console.log('✅ Group created:', response.data);
+      
+      // Extract the group ID from the response
+      let groupId = null;
+      if (response.data?.id) {
+        groupId = response.data.id;
+      } else if (response.data?.data?.id) {
+        groupId = response.data.data.id;
+      }
+      
+      if (groupId) {
+        console.log('Navigating to group:', groupId);
+        
+        // Call onGroupCreated if provided
+        if (onGroupCreated) {
+          onGroupCreated(response.data.data || response.data);
+        }
+        
+        // Close the modal first
+        onClose();
+        
+        // Use setTimeout to ensure modal is closed before navigation
+        setTimeout(() => {
+          // Navigate to the new group
+          navigate(`/groups/${groupId}`, { replace: true });
+        }, 100);
+      } else {
+        console.error('No group ID in response:', response.data);
+        setError('Failed to get group ID from response');
+        setLoading(false);
+      }
     } catch (error) {
+      console.error('❌ Error creating group:', error);
       setError(error.response?.data?.message || 'Failed to create group');
-    } finally {
       setLoading(false);
     }
   };
@@ -42,7 +78,7 @@ function CreateGroup({ onClose, onGroupCreated }) {
   };
 
   return (
-    <div style={styles.overlay}>
+    <div className="groups-container" style={styles.overlay}>
       <div style={styles.modal}>
         <div style={styles.header}>
           <h2 style={styles.title}>Create a New Group</h2>
@@ -60,7 +96,7 @@ function CreateGroup({ onClose, onGroupCreated }) {
               value={formData.name}
               onChange={handleChange}
               required
-              placeholder="e.g., Nairobi Worship Musicians"
+              placeholder="e.g., Young Professionals Prayer Circle"
               style={styles.input}
             />
           </div>
@@ -96,18 +132,67 @@ function CreateGroup({ onClose, onGroupCreated }) {
               </select>
             </div>
 
+            {/* NEW: Meeting Type Field */}
             <div style={styles.formGroup}>
-              <label style={styles.label}>Location</label>
-              <input
-                type="text"
-                name="location"
-                value={formData.location}
+              <label style={styles.label}>Meeting Type *</label>
+              <select
+                name="meetingType"
+                value={formData.meetingType}
                 onChange={handleChange}
-                placeholder="City or 'Online'"
-                style={styles.input}
-              />
+                required
+                style={styles.select}
+              >
+                <option value="online">💻 Online</option>
+                <option value="in-person">🤝 In-Person</option>
+                <option value="hybrid">🔄 Hybrid (Both)</option>
+              </select>
             </div>
           </div>
+
+          <div style={styles.formGroup}>
+            <label style={styles.label}>
+              Location (Optional)
+            </label>
+            <input
+              type="text"
+              name="location"
+              value={formData.location}
+              onChange={handleChange}
+              placeholder={
+                formData.meetingType === 'online' 
+                  ? 'e.g., "Online" or leave blank' 
+                  : 'e.g., "Nairobi CBD" or "Kenya"'
+              }
+              style={styles.input}
+            />
+            <p style={styles.helpText}>
+              {formData.meetingType === 'online' 
+                ? 'For online groups, you can leave this blank or type "Online"'
+                : 'Where does this group primarily meet? (City, Region, or Country)'}
+            </p>
+          </div>
+
+          {/* NEW: Location-Based Checkbox (only show for in-person/hybrid) */}
+          {(formData.meetingType === 'in-person' || formData.meetingType === 'hybrid') && (
+            <div style={styles.checkboxGroup}>
+              <label style={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  name="isLocationBased"
+                  checked={formData.isLocationBased}
+                  onChange={handleChange}
+                />
+                <span style={styles.checkboxText}>
+                  <strong>This group serves a specific geographic area</strong>
+                  <br />
+                  <small style={{ color: '#999' }}>
+                    Check this only if your group is truly location-specific (e.g., "Nairobi CBD Young Professionals"). 
+                    Don't check for interest-based groups that happen to meet in person.
+                  </small>
+                </span>
+              </label>
+            </div>
+          )}
 
           <div style={styles.formGroup}>
             <label style={styles.label}>Group Rules (Optional)</label>
@@ -171,6 +256,7 @@ function CreateGroup({ onClose, onGroupCreated }) {
   );
 }
 
+// Updated styles
 const styles = {
   overlay: {
     position: 'fixed',
@@ -258,6 +344,12 @@ const styles = {
     border: '1px solid #ddd',
     fontSize: '14px',
     backgroundColor: 'white',
+  },
+  helpText: {
+    fontSize: '12px',
+    color: '#999',
+    marginTop: '5px',
+    marginBottom: 0,
   },
   checkboxGroup: {
     marginBottom: '10px',

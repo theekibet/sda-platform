@@ -9,6 +9,7 @@ const ShareVerseModal = ({ verse, onClose, onSuccess }) => {
   const [comment, setComment] = useState('');
   const [error, setError] = useState('');
   const [queuePosition, setQueuePosition] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,15 +24,18 @@ const ShareVerseModal = ({ verse, onClose, onSuccess }) => {
     
     if (result.success) {
       setQueuePosition(result.data?.queuePosition);
-      if (onSuccess) {
-        setTimeout(() => {
-          onSuccess(result.data);
-          onClose();
-        }, 3000);
-      }
+      setSubmitted(true);
+      // Don't auto-close - let user see success message and click Done
     } else {
       setError(result.error || 'Failed to share verse');
     }
+  };
+
+  const handleDone = () => {
+    if (onSuccess) {
+      onSuccess({ queuePosition });
+    }
+    onClose();
   };
 
   return (
@@ -41,7 +45,7 @@ const ShareVerseModal = ({ verse, onClose, onSuccess }) => {
         
         <h2 style={styles.title}>📖 Share This Verse</h2>
         
-        {!queuePosition ? (
+        {!submitted ? (
           <>
             <div style={styles.versePreview}>
               <strong style={styles.verseRef}>{verse.reference}</strong>
@@ -100,7 +104,7 @@ const ShareVerseModal = ({ verse, onClose, onSuccess }) => {
             <p style={styles.successNote}>
               You'll be notified when it's approved and scheduled.
             </p>
-            <button onClick={onClose} style={styles.doneButton}>
+            <button onClick={handleDone} style={styles.doneButton}>
               Done
             </button>
           </div>

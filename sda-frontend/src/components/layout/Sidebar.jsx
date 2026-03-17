@@ -11,20 +11,20 @@ const Sidebar = ({ isOpen, onClose }) => {
   // Member-only links
   const memberLinks = [
     { path: '/dashboard', icon: '🏠', label: 'Dashboard' },
-    { path: '/forum', icon: '💬', label: 'Forum' },
+    { path: '/discover', icon: '🔥', label: 'Discover' },
     { path: '/prayer-wall', icon: '🙏', label: 'Prayer Wall' },
     { path: '/groups', icon: '🤝', label: 'Groups' },
-    { path: '/location', icon: '📍', label: 'Find Youth' },
-    { path: '/profile', icon: '👤', label: 'Profile' },
+    { path: '/community', icon: '📢', label: 'Community Board' },
+    
   ];
 
-  // Bible tools - for members only
+  // Bible tools - VERSE OF THE DAY REMOVED (now on dashboard)
   const bibleLinks = [
     { path: '/bible/reader', icon: '📖', label: 'Bible Reader' },
-    { path: '/bible/verse-of-day', icon: '✨', label: 'Verse of the Day' },
-    { path: '/bible/search', icon: '🔍', label: 'Search Bible' },
     { path: '/bible/queue', icon: '⏳', label: 'Verse Queue' },
+    { path: '/bible/bookmarks', icon: '🔖', label: 'Bookmarks' },
     { path: '/my-submissions', icon: '📤', label: 'My Shared Verses' },
+    { path: '/learning', icon: '📚', label: 'Learning Hub' },
   ];
 
   // Admin-only links

@@ -33,4 +33,18 @@ export const bibleService = {
   // Get user's submissions (requires login)
   getMySubmissions: () => 
     API.get('/bible/my-submissions'),
+
+  // ============ NEW METHODS FOR ENHANCED SUBMISSIONS ============
+
+  // Get detailed submission by ID
+  getSubmissionDetails: (id) => 
+    API.get(`/bible/my-submissions/${id}`),
+
+  // Cancel a pending submission (delete)
+  cancelSubmission: (id) => 
+    API.post(`/bible/my-submissions/${id}/cancel`),
+
+  // Get queue statistics for current user
+  getMyQueueStats: () => 
+    API.get('/bible/my-submissions/queue/stats'),
 };

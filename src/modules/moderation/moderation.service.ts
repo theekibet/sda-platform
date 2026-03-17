@@ -5,11 +5,10 @@ import { ModerationQueryDto } from './dto/moderation-query.dto';
 
 // Define a type for the content that can come from different tables
 type ContentType = 
-  | (Awaited<ReturnType<PrismaService['forumPost']['findUnique']>>)
-  | (Awaited<ReturnType<PrismaService['forumReply']['findUnique']>>)
   | (Awaited<ReturnType<PrismaService['prayerRequest']['findUnique']>>)
   | (Awaited<ReturnType<PrismaService['testimony']['findUnique']>>)
-  | (Awaited<ReturnType<PrismaService['groupDiscussion']['findUnique']>>);
+  | (Awaited<ReturnType<PrismaService['groupMessage']['findUnique']>>)
+  | (Awaited<ReturnType<PrismaService['communityPost']['findUnique']>>);
 
 @Injectable()
 export class ModerationService {
@@ -34,7 +33,14 @@ export class ModerationService {
     };
 
     if (type) {
-      where.contentType = type;
+      // Handle backward compatibility for group types
+      if (type === 'groupDiscussion' || type === 'groupMessage') {
+        where.contentType = {
+          in: ['groupDiscussion', 'groupMessage']
+        };
+      } else {
+        where.contentType = type;
+      }
     }
 
     if (severity) {
@@ -73,8 +79,14 @@ export class ModerationService {
       this.prisma.report.count({ where }),
     ]);
 
+    // Transform items for consistent content type naming
+    const transformedItems = items.map(item => ({
+      ...item,
+      contentType: item.contentType === 'groupDiscussion' ? 'groupMessage' : item.contentType,
+    }));
+
     return {
-      items,
+      items: transformedItems,
       total,
       page,
       totalPages: Math.ceil(total / limit),
@@ -85,36 +97,6 @@ export class ModerationService {
     let content: ContentType = null;
 
     switch (contentType) {
-      case 'forumPost':
-        content = await this.prisma.forumPost.findUnique({
-          where: { id: contentId },
-          include: {
-            author: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-            replies: true,
-          },
-        }) as ContentType;
-        break;
-      case 'forumReply':
-        content = await this.prisma.forumReply.findUnique({
-          where: { id: contentId },
-          include: {
-            author: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
-            post: true,
-          },
-        }) as ContentType;
-        break;
       case 'prayerRequest':
         content = await this.prisma.prayerRequest.findUnique({
           where: { id: contentId },
@@ -144,7 +126,8 @@ export class ModerationService {
         }) as ContentType;
         break;
       case 'groupDiscussion':
-        content = await this.prisma.groupDiscussion.findUnique({
+      case 'groupMessage':
+        content = await this.prisma.groupMessage.findUnique({
           where: { id: contentId },
           include: {
             author: {
@@ -155,6 +138,20 @@ export class ModerationService {
               },
             },
             group: true,
+          },
+        }) as ContentType;
+        break;
+      case 'communityPost':
+        content = await this.prisma.communityPost.findUnique({
+          where: { id: contentId },
+          include: {
+            author: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
           },
         }) as ContentType;
         break;
@@ -186,7 +183,7 @@ export class ModerationService {
       data: {
         moderatorId,
         action,
-        contentType,
+        contentType: contentType === 'groupDiscussion' ? 'groupMessage' : contentType,
         contentId,
         contentSnippet: this.getContentSnippet(content),
         reason,
@@ -214,13 +211,18 @@ export class ModerationService {
       case 'approve':
         // Mark as approved, no action needed
         break;
+      case 'dismiss':
+        // Dismiss the report, no action on content
+        break;
     }
 
     // Update any related reports
     await this.prisma.report.updateMany({
       where: {
         contentId,
-        contentType,
+        contentType: {
+          in: [contentType, contentType === 'groupDiscussion' ? 'groupMessage' : contentType]
+        },
         status: 'pending',
       },
       data: {
@@ -237,7 +239,7 @@ export class ModerationService {
       message: `Content ${action}d successfully`,
       action,
       contentId,
-      contentType,
+      contentType: contentType === 'groupDiscussion' ? 'groupMessage' : contentType,
     };
   }
 
@@ -287,12 +289,6 @@ export class ModerationService {
 
   private async removeContent(contentId: string, contentType: string) {
     switch (contentType) {
-      case 'forumPost':
-        await this.prisma.forumPost.delete({ where: { id: contentId } });
-        break;
-      case 'forumReply':
-        await this.prisma.forumReply.delete({ where: { id: contentId } });
-        break;
       case 'prayerRequest':
         await this.prisma.prayerRequest.delete({ where: { id: contentId } });
         break;
@@ -300,7 +296,11 @@ export class ModerationService {
         await this.prisma.testimony.delete({ where: { id: contentId } });
         break;
       case 'groupDiscussion':
-        await this.prisma.groupDiscussion.delete({ where: { id: contentId } });
+      case 'groupMessage':
+        await this.prisma.groupMessage.delete({ where: { id: contentId } });
+        break;
+      case 'communityPost':
+        await this.prisma.communityPost.delete({ where: { id: contentId } });
         break;
     }
   }
@@ -327,21 +327,27 @@ export class ModerationService {
   }
 
   private getContentSnippet(content: any): string {
-    if (content.content) {
+    if (content?.content) {
       return content.content.substring(0, 100);
     }
-    if (content.title) {
+    if (content?.title) {
       return `${content.title}: ${content.content?.substring(0, 50) || ''}`;
+    }
+    if (content?.description) {
+      return content.description.substring(0, 100);
     }
     return JSON.stringify(content).substring(0, 100);
   }
 
   private getContentPreview(content: any): string {
-    if (content.content) {
+    if (content?.content) {
       return content.content;
     }
-    if (content.title) {
+    if (content?.title) {
       return `${content.title}\n\n${content.content || ''}`;
+    }
+    if (content?.description) {
+      return content.description;
     }
     return JSON.stringify(content);
   }
@@ -358,12 +364,15 @@ export class ModerationService {
     );
 
     if (flaggedWords.length > 0) {
-      // Create auto-report with required contentId
+      // Generate a temporary ID for auto-flagged content
+      const tempId = `auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Create auto-report
       await this.prisma.report.create({
         data: {
           reportedById: 'system',
-          contentType,
-          contentId: 'auto-flag', // Add a placeholder or generate one
+          contentType: contentType === 'groupDiscussion' ? 'groupMessage' : contentType,
+          contentId: tempId,
           contentSnippet: content.substring(0, 200),
           category: 'auto-flagged',
           description: `Auto-flagged for: ${flaggedWords.map(f => f.keyword).join(', ')}`,
@@ -379,5 +388,97 @@ export class ModerationService {
     }
 
     return { flagged: false };
+  }
+
+  // ============ STATISTICS ============
+
+  async getModerationStats() {
+    const [pendingReports, resolvedToday, totalModerated, topModerators] = await Promise.all([
+      this.prisma.report.count({ where: { status: 'pending' } }),
+      this.prisma.report.count({
+        where: {
+          status: 'resolved',
+          resolvedAt: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
+          },
+        },
+      }),
+      this.prisma.moderationLog.count(),
+      this.prisma.moderationLog.groupBy({
+        by: ['moderatorId'],
+        _count: true,
+        orderBy: {
+          _count: {
+            moderatorId: 'desc',
+          },
+        },
+        take: 5,
+      }),
+    ]);
+
+    const contentTypeBreakdown = await this.prisma.report.groupBy({
+      by: ['contentType'],
+      _count: true,
+    });
+
+    // Transform content types for consistent naming
+    const transformedBreakdown = contentTypeBreakdown.reduce((acc, curr) => {
+      const key = curr.contentType === 'groupDiscussion' ? 'groupMessage' : curr.contentType;
+      acc[key] = (acc[key] || 0) + curr._count;
+      return acc;
+    }, {});
+
+    return {
+      pendingReports,
+      resolvedToday,
+      totalModerated,
+      contentTypeBreakdown: transformedBreakdown,
+      topModerators,
+    };
+  }
+
+  // ============ BULK OPERATIONS ============
+
+  async bulkModerate(
+    moderatorId: string, 
+    contentIds: string[], 
+    contentType: string, 
+    action: 'approve' | 'remove' | 'warn' | 'flag' | 'dismiss', 
+    reason?: string
+  ) {
+    const results: Array<{ 
+      contentId: string; 
+      success: boolean; 
+      result?: { 
+        success: boolean; 
+        message: string; 
+        action: string; 
+        contentId: string; 
+        contentType: string; 
+      }; 
+      error?: string;
+    }> = [];
+    
+    for (const contentId of contentIds) {
+      try {
+        const result = await this.moderateContent(moderatorId, contentId, contentType, {
+          action,
+          reason,
+          notifyUser: false,
+          sendWarning: false,
+        });
+        results.push({ contentId, success: true, result });
+      } catch (error) {
+        results.push({ contentId, success: false, error: error.message });
+      }
+    }
+
+    return {
+      success: true,
+      processed: results.length,
+      successful: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      results,
+    };
   }
 }

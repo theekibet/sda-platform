@@ -54,7 +54,6 @@ const FeatureFlags = () => {
 
   const getFlagDescription = (flagName) => {
     const descriptions = {
-      [FEATURE_FLAGS.FORUM]: 'Enable or disable the community forum',
       [FEATURE_FLAGS.PRAYER_WALL]: 'Enable or disable the prayer wall',
       [FEATURE_FLAGS.GROUPS]: 'Enable or disable fellowship groups',
       [FEATURE_FLAGS.LOCATION]: 'Enable or disable location-based features',

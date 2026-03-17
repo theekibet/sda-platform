@@ -78,6 +78,18 @@ export class MembersController {
     };
   }
 
+  // ============ NEW: LOCATION ENDPOINTS ============
+  
+  @Patch('profile/location')
+  @HttpCode(HttpStatus.OK)
+  async updateLocation(
+    @CurrentUser() user: any,
+    @Body('locationName') locationName?: string,
+    @Body('locationPrivacy') locationPrivacy?: 'exact' | 'city' | 'country' | 'none',
+  ) {
+    return this.membersService.updateLocation(user.id, { locationName, locationPrivacy });
+  }
+
   // ============ BASIC MEMBER ENDPOINTS ============
   
   @Get('me')

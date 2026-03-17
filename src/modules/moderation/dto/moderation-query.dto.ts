@@ -5,7 +5,7 @@ import { Type } from 'class-transformer';
 export class ModerationQueryDto {
   @IsOptional()
   @IsString()
-  @IsIn(['forumPost', 'forumReply', 'prayerRequest', 'testimony', 'groupDiscussion', 'user'])
+  @IsIn(['prayerRequest', 'testimony', 'groupDiscussion', 'user'])
   type?: string;
 
   @IsOptional()

@@ -127,7 +127,6 @@ function Analytics() {
           <h3 style={styles.sectionTitle}>Content Statistics</h3>
           <div style={styles.statsGrid}>
             <div style={styles.statCard}>
-              <span style={styles.statValue}>{contentStats.totals?.forumPosts || 0}</span>
               <span style={styles.statLabel}>Forum Posts</span>
             </div>
             <div style={styles.statCard}>
